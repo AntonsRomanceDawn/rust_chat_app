@@ -1,0 +1,132 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, sqlx::Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum UserRole {
+    Admin,
+    User,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, sqlx::Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum InvitationStatus {
+    Pending,
+    Accepted,
+    Declined,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct User {
+    pub id: Uuid,
+    pub username: String,
+    pub password_hash: String,
+    pub role: UserRole,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Room {
+    pub id: Uuid,
+    pub name: String,
+    pub creator_id: Uuid,
+    pub creator_username: String,
+    pub admin_id: Uuid,
+    pub admin_username: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct RoomMember {
+    pub room_id: Uuid,
+    pub room_name: String,
+    pub user_id: Uuid,
+    pub username: String,
+    pub joined_at: DateTime<Utc>,
+    pub last_read_at: DateTime<Utc>,
+    pub unread_count: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct UserMessage {
+    pub id: Uuid,
+    pub room_id: Uuid,
+    pub room_name: String,
+    pub author_id: Uuid,
+    pub author_username: String,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct RefreshToken {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Invitation {
+    pub id: Uuid,
+    pub room_id: Uuid,
+    pub room_name: String,
+    pub invitee_id: Uuid,
+    pub invitee_username: String,
+    pub inviter_id: Uuid,
+    pub inviter_username: String,
+    pub status: InvitationStatus,
+    pub created_at: DateTime<Utc>,
+}
+
+impl std::fmt::Display for UserRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                UserRole::Admin => "admin",
+                UserRole::User => "user",
+            }
+        )
+    }
+}
+
+impl From<String> for UserRole {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "admin" => UserRole::Admin,
+            "user" => UserRole::User,
+            _ => UserRole::User,
+        }
+    }
+}
+
+impl std::fmt::Display for InvitationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                InvitationStatus::Pending => "pending",
+                InvitationStatus::Accepted => "accepted",
+                InvitationStatus::Declined => "declined",
+            }
+        )
+    }
+}
+
+impl From<String> for InvitationStatus {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "pending" => InvitationStatus::Pending,
+            "accepted" => InvitationStatus::Accepted,
+            "declined" => InvitationStatus::Declined,
+            _ => InvitationStatus::Declined,
+        }
+    }
+}

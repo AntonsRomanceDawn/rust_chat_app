@@ -1,0 +1,29 @@
+pub const WRONG_CREDENTIALS: &str = "wrong_credentials";
+pub const USERNAME_REQUIRED: &str = "username_required";
+pub const USERNAME_TOO_SHORT: &str = "username_too_short";
+pub const USERNAME_TOO_LONG: &str = "username_too_long";
+pub const USERNAME_ALREADY_EXISTS: &str = "username_already_exists";
+pub const PASSWORD_REQUIRED: &str = "password_required";
+pub const PASSWORD_TOO_WEAK: &str = "password_too_weak";
+pub const PASSWORD_TOO_SHORT: &str = "password_too_short";
+pub const PASSWORD_TOO_LONG: &str = "password_too_long";
+pub const CONFIRM_PASSWORD_REQUIRED: &str = "confirm_password_required";
+pub const PASSWORD_CONFLICT: &str = "password_conflict";
+pub const SESSION_EXPIRED: &str = "session_expired";
+pub const INVALID_TOKEN: &str = "invalid_token";
+pub const INTERNAL_SERVER_ERROR: &str = "internal_server_error";
+
+// WebSocket specific errors
+pub const ROOM_NOT_FOUND: &str = "room_not_found";
+pub const ALREADY_ROOM_MEMBER: &str = "already_room_member";
+pub const TARGET_ALREADY_ROOM_MEMBER: &str = "target_already_room_member";
+pub const NOT_ROOM_MEMBER: &str = "not_room_member";
+pub const TARGET_NOT_ROOM_MEMBER: &str = "target_not_room_member";
+pub const NOT_ROOM_ADMIN: &str = "not_room_admin";
+pub const USER_NOT_FOUND: &str = "user_not_found";
+pub const INVITATION_NOT_FOUND: &str = "invitation_not_found";
+pub const NO_PENDING_INVITATION: &str = "no_pending_invitation";
+pub const ALREADY_INVITED: &str = "already_invited";
+pub const MESSAGE_NOT_FOUND: &str = "message_not_found";
+pub const NOT_MESSAGE_AUTHOR: &str = "not_message_author";
+pub const INVALID_REQUEST_FORMAT: &str = "invalid_request_format";

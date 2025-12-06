@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE room_members\n            SET last_read_at = NOW()\n            , unread_count = 0\n            WHERE room_id = $1 AND user_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4cd5c46dcaec20e7f2247e3ef7dba8bdc12fdd4af698b01ca93a1cb5fa324191"
+}

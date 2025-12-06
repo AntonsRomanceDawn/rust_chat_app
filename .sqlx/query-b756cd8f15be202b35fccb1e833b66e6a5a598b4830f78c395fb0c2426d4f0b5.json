@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO room_members (room_id, room_name, user_id, username, joined_at, last_read_at, unread_count)\n            VALUES ($1, $2, $3, $4, $5, $6, $7)\n             ON CONFLICT (room_id, user_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b756cd8f15be202b35fccb1e833b66e6a5a598b4830f78c395fb0c2426d4f0b5"
+}
