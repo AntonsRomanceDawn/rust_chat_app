@@ -37,6 +37,8 @@ echo "📦 Setting up Web Client..."
 cd web_client
 echo "📥 Installing npm dependencies..."
 npm install
+echo "➕ Installing Signal Protocol dependencies..."
+npm install @privacyresearch/libsignal-protocol-typescript buffer
 cd ..
 
 echo "✅ Setup Complete!"
