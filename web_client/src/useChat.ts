@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ClientReq, ServerResp, RoomInfo, MessageInfo, InvitationInfo, UserInfo, MemberInfo } from './types';
+import { SignalManager } from './lib/SignalManager';
 
 const WS_URL = 'ws://localhost:3000/ws_handler'; // Or wss:// if using HTTPS
 
@@ -12,7 +13,7 @@ export interface RoomDetails {
     created_at: string;
 }
 
-export function useChat(token: string | null, refreshToken: () => Promise<string | null>) {
+export function useChat(token: string | null, username: string | null, refreshToken: () => Promise<string | null>) {
     const [socket, setSocket] = useState<WebSocket | null>(null);
     const [rooms, setRooms] = useState<RoomInfo[]>([]);
     const [currentRoom, setCurrentRoom] = useState<string | null>(null);
@@ -24,12 +25,36 @@ export function useChat(token: string | null, refreshToken: () => Promise<string
     const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
     const [roomDetails, setRoomDetails] = useState<RoomDetails | null>(null);
     const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+    const [signalManager, setSignalManager] = useState<SignalManager | null>(null);
 
     // Ref to access currentRoom inside the websocket callback without dependency issues
     const currentRoomRef = useRef<string | null>(null);
     useEffect(() => {
         currentRoomRef.current = currentRoom;
-    }, [currentRoom]);
+        if (currentRoom && socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'get_room_info', room_id: currentRoom }));
+            socket.send(JSON.stringify({ type: 'get_messages', room_id: currentRoom, limit: 50, offset: 0 }));
+        }
+    }, [currentRoom, socket]);
+
+    useEffect(() => {
+        if (token && username) {
+            const manager = new SignalManager(username, token);
+            manager.initialize().then(() => {
+                console.log("Signal Manager Initialized");
+                setSignalManager(manager);
+            }).catch(e => {
+                console.error("Failed to initialize Signal Manager", e);
+            });
+        } else {
+            setSignalManager(null);
+        }
+    }, [token, username]);
+
+    const signalManagerRef = useRef<SignalManager | null>(null);
+    useEffect(() => {
+        signalManagerRef.current = signalManager;
+    }, [signalManager]);
 
     useEffect(() => {
         if (!token) {
@@ -69,11 +94,11 @@ export function useChat(token: string | null, refreshToken: () => Promise<string
                 }
             };
 
-            ws.onmessage = (event) => {
+            ws.onmessage = async (event) => {
                 if (isUnmounted) return;
                 try {
                     const data: ServerResp = JSON.parse(event.data);
-                    handleServerMessage(data);
+                    await handleServerMessage(data);
                 } catch (e) {
                     console.error('Failed to parse message', e);
                 }
@@ -85,28 +110,13 @@ export function useChat(token: string | null, refreshToken: () => Promise<string
                 setIsConnected(false);
                 setSocket(null);
 
-                // If closed abnormally or due to auth error (though codes vary), try refresh
-                // 1006 is abnormal closure (e.g. server died or connection dropped)
-                // If server rejects handshake, it might close immediately.
                 if (!isUnmounted) {
                     console.log('Attempting to reconnect...');
-                    // Try to refresh token if it might be expired
-                    // We don't know for sure if it's expired, but if we can't connect, it's a good guess
-                    // However, we shouldn't loop infinitely refreshing.
-                    // Simple strategy: Wait 3s, then try to refresh token, then let the token change trigger re-render
-                    // BUT, if we refresh token, `token` prop changes, so this effect cleans up and runs again.
-                    // So we just need to call refreshToken().
-
                     reconnectTimeout = setTimeout(async () => {
                         const newToken = await refreshToken();
                         if (!newToken) {
-                            // Refresh failed (e.g. refresh token expired), user logged out by App
                             return;
                         }
-                        // If refresh succeeded, `token` prop will update, triggering re-effect.
-                        // If refresh returned same token (e.g. it wasn't expired but network error),
-                        // we might need to force reconnect. But `refreshToken` implementation in App
-                        // always gets a NEW access token from server. So `token` WILL change.
                     }, 3000);
                 }
             };
@@ -129,9 +139,9 @@ export function useChat(token: string | null, refreshToken: () => Promise<string
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
             ws?.close();
         };
-    }, [token]); // Re-run when token changes (e.g. after refresh)
+    }, [token]);
 
-    const handleServerMessage = (data: ServerResp) => {
+    const handleServerMessage = async (data: ServerResp) => {
         console.log('Received:', data);
         switch (data.type) {
             case 'rooms_info':
@@ -149,7 +159,6 @@ export function useChat(token: string | null, refreshToken: () => Promise<string
                 break;
             case 'room_joined':
                 setRooms(prev => [...prev, { room_id: data.room_id, room_name: data.room_name, unread_count: 0 }]);
-                // Remove invitation if it exists
                 setInvitations(prev => prev.filter(inv => inv.invitation_id !== data.invitation_id));
                 break;
             case 'room_left':
@@ -177,27 +186,44 @@ export function useChat(token: string | null, refreshToken: () => Promise<string
                 setInvitations(prev => prev.filter(inv => inv.invitation_id !== data.invitation_id));
                 break;
             case 'message_history':
-                setMessages(prev => ({
-                    ...prev,
-                    [data.room_id]: data.messages
-                }));
+                {
+                    const decryptedMessages = await Promise.all(data.messages.map(async (msg) => {
+                        let content = msg.content;
+                        if (signalManagerRef.current) {
+                            content = await signalManagerRef.current.decryptMessage(msg.author_username, msg.content);
+                        }
+                        return { ...msg, content };
+                    }));
+                    setMessages(prev => ({
+                        ...prev,
+                        [data.room_id]: decryptedMessages
+                    }));
+                }
                 break;
             case 'message_received':
             case 'message_sent':
-                setMessages(prev => ({
-                    ...prev,
-                    [data.room_id]: [...(prev[data.room_id] || []), {
-                        message_id: data.message_id,
-                        author_username: data.type === 'message_sent' ? 'Me' : data.author_username, // Simplified
-                        content: data.content,
-                        created_at: data.created_at
-                    }]
-                }));
-                if (data.type === 'message_received' && data.room_id !== currentRoomRef.current) {
-                    setUnreadCounts(prev => ({
+                {
+                    let content = data.content;
+                    const author = data.type === 'message_sent' ? (username || 'Me') : data.author_username;
+                    if (signalManagerRef.current) {
+                        content = await signalManagerRef.current.decryptMessage(author, data.content);
+                    }
+
+                    setMessages(prev => ({
                         ...prev,
-                        [data.room_id]: (prev[data.room_id] || 0) + 1
+                        [data.room_id]: [...(prev[data.room_id] || []), {
+                            message_id: data.message_id,
+                            author_username: author,
+                            content: content,
+                            created_at: data.created_at
+                        }]
                     }));
+                    if (data.type === 'message_received' && data.room_id !== currentRoomRef.current) {
+                        setUnreadCounts(prev => ({
+                            ...prev,
+                            [data.room_id]: (prev[data.room_id] || 0) + 1
+                        }));
+                    }
                 }
                 break;
             case 'room_info':
@@ -219,9 +245,21 @@ export function useChat(token: string | null, refreshToken: () => Promise<string
         }
     };
 
-    const send = (req: ClientReq) => {
+    const send = async (req: ClientReq) => {
         if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify(req));
+            if (req.type === 'send_message' && signalManagerRef.current && roomDetails && roomDetails.room_id === req.room_id) {
+                try {
+                    const members = roomDetails.members.map(m => m.username);
+                    const encrypted = await signalManagerRef.current.encryptGroupMessage(req.room_id, req.content, members);
+                    const newReq = { ...req, content: encrypted.content };
+                    socket.send(JSON.stringify(newReq));
+                } catch (e) {
+                    console.error("Encryption failed", e);
+                    setError("Failed to encrypt message");
+                }
+            } else {
+                socket.send(JSON.stringify(req));
+            }
         } else {
             console.error('WebSocket not connected');
         }

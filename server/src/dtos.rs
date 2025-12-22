@@ -117,6 +117,7 @@ pub enum ClientReq {
     SendMessage {
         room_id: Uuid,
         content: String,
+        message_type: Option<i32>,
     },
     EditMessage {
         message_id: Uuid,
@@ -209,6 +210,7 @@ pub enum ServerResp {
         room_id: Uuid,
         room_name: String,
         content: String,
+        message_type: i32,
         created_at: DateTime<Utc>,
     },
     MessageReceived {
@@ -217,6 +219,7 @@ pub enum ServerResp {
         room_name: String,
         author_username: String,
         content: String,
+        message_type: i32,
         created_at: DateTime<Utc>,
     },
     MessageEdited {
@@ -280,6 +283,7 @@ pub struct MessageInfo {
     pub message_id: Uuid,
     pub author_username: String,
     pub content: String,
+    pub message_type: i32,
     pub created_at: DateTime<Utc>,
 }
 
@@ -288,4 +292,38 @@ pub struct RoomInfo {
     pub room_id: Uuid,
     pub room_name: String,
     pub unread_count: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UploadKeysReqDto {
+    pub identity_key: String,
+    pub registration_id: i32,
+    pub signed_prekey: SignedPreKeyDto,
+    pub one_time_prekeys: Vec<OneTimePreKeyDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignedPreKeyDto {
+    pub key_id: i32,
+    pub public_key: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OneTimePreKeyDto {
+    pub key_id: i32,
+    pub public_key: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PreKeyBundleRespDto {
+    pub identity_key: String,
+    pub registration_id: i32,
+    pub signed_prekey: SignedPreKeyDto,
+    pub one_time_prekey: Option<OneTimePreKeyDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KeyCountRespDto {
+    pub count: i64,
 }

@@ -47,6 +47,23 @@ pub fn generate_access_token(
     })
 }
 
+#[instrument(skip(headers, secret))]
+pub fn extract_and_verify_token(
+    headers: &axum::http::HeaderMap,
+    secret: &[u8],
+) -> Result<(Uuid, UserRole, usize), HttpError> {
+    let token = headers
+        .get("Authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .ok_or_else(|| {
+            warn!("Authorization header missing or malformed");
+            HttpError::unauthorized([ApiErrorItem::new(error_codes::INVALID_TOKEN, None)])
+        })?;
+
+    verify_access_token(token, secret)
+}
+
 #[instrument]
 pub fn generate_refresh_token() -> Result<String, HttpError> {
     let mut bytes = [0u8; 32];
@@ -54,7 +71,10 @@ pub fn generate_refresh_token() -> Result<String, HttpError> {
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&bytes))
 }
 
-pub fn verify_access_token(token: &str, secret: &[u8]) -> Result<(Uuid, usize), HttpError> {
+pub fn verify_access_token(
+    token: &str,
+    secret: &[u8],
+) -> Result<(Uuid, UserRole, usize), HttpError> {
     let result = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret),
@@ -67,7 +87,7 @@ pub fn verify_access_token(token: &str, secret: &[u8]) -> Result<(Uuid, usize), 
                 error!("Failed to parse user ID from token claims: {:?}", e);
                 HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
             })?;
-            Ok((user_id, token_data.claims.exp))
+            Ok((user_id, token_data.claims.role, token_data.claims.exp))
         }
 
         Err(e) => {

@@ -31,6 +31,7 @@ function App() {
         localStorage.removeItem('token');
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('username');
+        localStorage.removeItem('signal_store_v2');
     };
 
     const refreshAuthToken = async (): Promise<string | null> => {
@@ -58,7 +59,7 @@ function App() {
         rooms, currentRoom, setCurrentRoom, messages, invitations, searchResults,
         error: wsError, isConnected, send, unreadCounts, clearUnread, roomDetails, setRoomDetails,
         notification, setNotification
-    } = useChat(token, refreshAuthToken);
+    } = useChat(token, username, refreshAuthToken);
 
     const [messageInput, setMessageInput] = useState('');
     const [newRoomName, setNewRoomName] = useState('');
@@ -208,9 +209,9 @@ function App() {
     }
 
     return (
-        <div className="min-h-screen flex flex-col bg-gray-50">
+        <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
             {/* Header */}
-            <header className="bg-white shadow p-4 flex justify-between items-center">
+            <header className="bg-white shadow p-4 flex justify-between items-center flex-shrink-0 z-10">
                 <h1 className="text-xl font-bold">Encrypted Chat</h1>
                 <div className="flex items-center gap-4">
                     <span>Welcome, {username}</span>
@@ -285,10 +286,10 @@ function App() {
                 </aside>
 
                 {/* Main Chat Area */}
-                <main className="flex-1 flex flex-col">
+                <main className="flex-1 flex flex-col min-w-0">
                     {currentRoom ? (
                         <>
-                            <div className="p-4 border-b bg-white flex justify-between items-center">
+                            <div className="p-4 border-b bg-white flex justify-between items-center flex-shrink-0">
                                 <div className="flex items-center gap-2">
                                     <h2 className="font-bold text-lg"># {rooms.find(r => r.room_id === currentRoom)?.room_name}</h2>
                                     <button
@@ -326,7 +327,7 @@ function App() {
                                                 </form>
                                                 <ul className="max-h-40 overflow-y-auto">
                                                     {searchResults.filter(u => u.username !== username).map(u => (
-                                                        <li key={u.id} className="flex justify-between items-center p-1 hover:bg-gray-50 text-sm">
+                                                        <li key={u.username} className="flex justify-between items-center p-1 hover:bg-gray-50 text-sm">
                                                             <span>{u.username}</span>
                                                             <button onClick={() => handleInvite(u.username)} className="text-blue-500 text-xs">Invite</button>
                                                         </li>
@@ -354,19 +355,19 @@ function App() {
                                 </div>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 min-h-0">
                                 {messages[currentRoom]?.map((msg, i) => (
                                     <div key={msg.message_id || i} className={`flex flex-col ${msg.author_username === 'Me' || msg.author_username === username ? 'items-end' : 'items-start'}`}>
-                                        <div className={`max-w-[70%] rounded-lg p-3 ${msg.author_username === 'Me' || msg.author_username === username ? 'bg-blue-500 text-white' : 'bg-white border'}`}>
+                                        <div className={`max-w-[70%] rounded-lg p-3 break-words ${msg.author_username === 'Me' || msg.author_username === username ? 'bg-blue-500 text-white' : 'bg-white border'}`}>
                                             <p className="text-xs opacity-75 mb-1">{msg.author_username}</p>
-                                            <p>{msg.content}</p>
+                                            <p className="break-words whitespace-pre-wrap">{msg.content}</p>
                                         </div>
                                         <span className="text-xs text-gray-400 mt-1">{new Date(msg.created_at).toLocaleTimeString()}</span>
                                     </div>
                                 ))}
                             </div>
 
-                            <div className="p-4 bg-white border-t">
+                            <div className="p-4 bg-white border-t flex-shrink-0">
                                 <form onSubmit={handleSendMessage} className="flex gap-2">
                                     <input
                                         type="text"
@@ -375,7 +376,7 @@ function App() {
                                         value={messageInput}
                                         onChange={e => setMessageInput(e.target.value)}
                                     />
-                                    <button type="submit" className="bg-blue-500 text-white px-6 rounded hover:bg-blue-600">Send</button>
+                                    <button type="submit" className="bg-blue-500 text-white px-6 rounded hover:bg-blue-600 flex-shrink-0">Send</button>
                                 </form>
                             </div>
                         </>

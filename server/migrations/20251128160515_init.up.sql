@@ -39,6 +39,7 @@ CREATE TABLE user_messages (
     author_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     author_username TEXT NOT NULL,
     content    TEXT NOT NULL,
+    message_type INT NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -65,3 +66,31 @@ CREATE TABLE invitations (
 );
 
 CREATE UNIQUE INDEX unique_pending_invitation ON invitations (room_id, invitee_id, inviter_id) WHERE status = 'pending';
+
+-- identity_keys
+CREATE TABLE identity_keys (
+    user_id         UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    identity_key    TEXT NOT NULL, -- Base64 encoded public key
+    registration_id INT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- signed_prekeys
+CREATE TABLE signed_prekeys (
+    id              UUID PRIMARY KEY,
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key_id          INT NOT NULL,
+    public_key      TEXT NOT NULL, -- Base64 encoded public key
+    signature       TEXT NOT NULL, -- Base64 encoded signature
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, key_id)
+);
+
+-- one_time_prekeys
+CREATE TABLE one_time_prekeys (
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key_id          INT NOT NULL,
+    public_key      TEXT NOT NULL, -- Base64 encoded public key
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, key_id)
+);

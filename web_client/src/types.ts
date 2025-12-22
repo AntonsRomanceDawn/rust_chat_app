@@ -45,8 +45,8 @@ export interface InvitationInfo {
 }
 
 export interface UserInfo {
-    id: string;
     username: string;
+    created_at: string;
 }
 
 // WebSocket Events

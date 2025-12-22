@@ -1,5 +1,6 @@
 pub mod db;
 pub mod invitations;
+pub mod keys;
 pub mod models;
 pub mod refresh_token;
 pub mod room_members;

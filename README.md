@@ -4,6 +4,7 @@ A real-time chat application built with Rust (Axum) backend and React (Vite) fro
 
 ## Features
 
+- **End-to-End Encryption (E2EE)**: Secure messaging using the Signal Protocol (X3DH + Double Ratchet). Messages are encrypted on the device and only readable by the intended recipients.
 - **Authentication**: Secure user registration and login using JWT (Access & Refresh Tokens).
 - **Real-time Messaging**: WebSocket-based communication for instant message delivery.
 - **Rooms**: Create and join chat rooms.
@@ -18,12 +19,14 @@ A real-time chat application built with Rust (Axum) backend and React (Vite) fro
 - **Database**: PostgreSQL (via [SQLx](https://github.com/launchbadge/sqlx))
 - **Async Runtime**: Tokio
 - **Security**: Scrypt for password hashing, JWT for sessions.
+- **Encryption**: Signal Protocol key management.
 
 ### Frontend (`/web_client`)
 - **Framework**: React
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS
 - **HTTP Client**: Axios
+- **Encryption**: `@privacyresearch/libsignal-protocol-typescript` (requires `vite-plugin-node-polyfills`)
 
 ## Prerequisites
 
@@ -34,7 +37,18 @@ A real-time chat application built with Rust (Axum) backend and React (Vite) fro
 
 ## Getting Started
 
-### 1. Database Setup
+### Quick Setup
+
+We have provided a setup script to install all dependencies and prepare the project.
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+### Manual Setup
+
+#### 1. Database Setup
 
 Ensure your PostgreSQL server is running and create a database.
 

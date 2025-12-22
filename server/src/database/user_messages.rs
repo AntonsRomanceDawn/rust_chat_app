@@ -14,6 +14,7 @@ pub trait MessageRepository: Send + Sync {
         author_id: Uuid,
         author_username: String,
         content: &str,
+        message_type: i32,
     ) -> Result<UserMessage, sqlx::Error>;
 
     async fn get_message_by_id(&self, message_id: Uuid)
@@ -46,12 +47,13 @@ impl MessageRepository for Db {
         author_id: Uuid,
         author_username: String,
         content: &str,
+        message_type: i32,
     ) -> Result<UserMessage, sqlx::Error> {
         sqlx::query_as!(
             UserMessage,
             r#"
-            INSERT INTO user_messages (id, room_id, room_name, author_id, author_username, content, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO user_messages (id, room_id, room_name, author_id, author_username, content, message_type, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             "#,
             Uuid::new_v4(),
@@ -60,6 +62,7 @@ impl MessageRepository for Db {
             author_id,
             author_username,
             content,
+            message_type,
             Utc::now()
         )
         .fetch_one(self.pool())

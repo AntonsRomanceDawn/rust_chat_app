@@ -58,6 +58,7 @@ pub struct UserMessage {
     pub author_id: Uuid,
     pub author_username: String,
     pub content: String,
+    pub message_type: i32,
     pub created_at: DateTime<Utc>,
 }
 
@@ -104,6 +105,32 @@ impl From<String> for UserRole {
             _ => UserRole::User,
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct IdentityKey {
+    pub user_id: Uuid,
+    pub identity_key: String,
+    pub registration_id: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SignedPreKey {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub key_id: i32,
+    pub public_key: String,
+    pub signature: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct OneTimePreKey {
+    pub user_id: Uuid,
+    pub key_id: i32,
+    pub public_key: String,
+    pub created_at: DateTime<Utc>,
 }
 
 impl std::fmt::Display for InvitationStatus {

@@ -1,9 +1,10 @@
 use axum::{
     Json, Router,
     extract::{
-        Query, State,
+        Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    http::HeaderMap,
     response::IntoResponse,
     routing::{get, post},
 };
@@ -17,6 +18,7 @@ use crate::{
     config::AppState,
     database::{
         invitations::InvitationRepository,
+        keys::KeyRepository,
         models::{InvitationStatus, UserRole},
         refresh_token::RefreshTokenRepository,
         room_members::RoomMemberRepository,
@@ -25,17 +27,21 @@ use crate::{
         users::UserRepository,
     },
     dtos::{
-        ClientReq, InvitationInfo, LoginReqDto, LoginRespDto, MemberInfo, MessageInfo,
-        RefreshTokenReqDto, RefreshTokenRespDto, RegisterReqDto, RegisterRespDto, RoomInfo,
-        ServerResp, UserInfo, WsParams,
+        ClientReq, InvitationInfo, KeyCountRespDto, LoginReqDto, LoginRespDto, MemberInfo,
+        MessageInfo, OneTimePreKeyDto, PreKeyBundleRespDto, RefreshTokenReqDto,
+        RefreshTokenRespDto, RegisterReqDto, RegisterRespDto, RoomInfo, ServerResp,
+        SignedPreKeyDto, UploadKeysReqDto, UserInfo, WsParams,
     },
     errors::{
         error::{ApiErrorItem, HttpError},
-        error_codes,
+        error_codes::{self, USER_NOT_FOUND},
     },
     utils::{
         hash::{hash_password, hash_refresh_token, verify_hashed_password},
-        token::{generate_access_token, generate_refresh_token, verify_access_token},
+        token::{
+            extract_and_verify_token, generate_access_token, generate_refresh_token,
+            verify_access_token,
+        },
     },
 };
 
@@ -44,6 +50,9 @@ pub fn handler(state: AppState) -> Router {
         .route("/register", post(register))
         .route("/login", post(login))
         .route("/refresh-token", post(refresh_token))
+        .route("/keys", post(upload_keys))
+        .route("/keys/status/count", get(get_key_count))
+        .route("/keys/{username}", get(get_prekey_bundle))
         .route("/ws_handler", get(ws_handler))
         .with_state(state)
 }
@@ -243,6 +252,153 @@ async fn refresh_token(
     Ok(Json::<RefreshTokenRespDto>(refresh_response))
 }
 
+#[instrument(skip(state, body))]
+async fn upload_keys(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<UploadKeysReqDto>,
+) -> Result<(), HttpError> {
+    info!("Uploading keys");
+    let (user_id, _, _) = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
+
+    let _ = state
+        .db
+        .upsert_identity_key(user_id, body.identity_key, body.registration_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to upsert identity key: {:?}", e);
+            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+        })?;
+
+    let _ = state
+        .db
+        .upsert_signed_prekey(
+            user_id,
+            body.signed_prekey.key_id,
+            body.signed_prekey.public_key,
+            body.signed_prekey.signature,
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to upsert signed prekey: {:?}", e);
+            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+        })?;
+
+    let ot_keys = body
+        .one_time_prekeys
+        .into_iter()
+        .map(|k| (k.key_id, k.public_key))
+        .collect();
+
+    let _ = state
+        .db
+        .upload_one_time_prekeys(user_id, ot_keys)
+        .await
+        .map_err(|e| {
+            error!("Failed to upload one-time prekeys: {:?}", e);
+            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+        })?;
+
+    Ok(())
+}
+
+#[instrument(skip(state))]
+async fn get_key_count(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<KeyCountRespDto>, HttpError> {
+    let (user_id, _, _) = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
+
+    let count = state
+        .db
+        .get_prekey_bundle_counts(user_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to get key count: {:?}", e);
+            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+        })?;
+
+    Ok(Json(KeyCountRespDto { count }))
+}
+
+#[instrument(skip(state))]
+async fn get_prekey_bundle(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(username): Path<String>,
+) -> Result<Json<PreKeyBundleRespDto>, HttpError> {
+    let _ = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
+
+    let user = match state.db.get_user_by_username(&username).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            warn!("User not found: {}", username);
+            return Err(HttpError::bad_request([ApiErrorItem::new(
+                USER_NOT_FOUND,
+                None,
+            )]));
+        }
+        Err(e) => {
+            error!("Failed to get user by username: {:?}", e);
+            return Err(HttpError::internal([ApiErrorItem::new(
+                error_codes::INTERNAL_SERVER_ERROR,
+                None,
+            )]));
+        }
+    };
+
+    let user_id = user.id;
+
+    let identity_key = state
+        .db
+        .get_identity_key(user_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to get identity key: {:?}", e);
+            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+        })?
+        .ok_or_else(|| {
+            warn!("User {} has no identity key", user_id);
+            HttpError::bad_request([ApiErrorItem::new(error_codes::USER_HAS_NO_KEYS, None)])
+        })?;
+
+    let signed_prekey = state
+        .db
+        .get_signed_prekey(user_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to get signed prekey: {:?}", e);
+            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+        })?
+        .ok_or_else(|| {
+            warn!("User {} has no signed prekey", user_id);
+            HttpError::bad_request([ApiErrorItem::new(error_codes::USER_HAS_NO_KEYS, None)])
+        })?;
+
+    let one_time_prekey = state
+        .db
+        .consume_one_time_prekey(user_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to consume one-time prekey: {:?}", e);
+            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+        })?;
+
+    Ok(Json(PreKeyBundleRespDto {
+        identity_key: identity_key.identity_key,
+        registration_id: identity_key.registration_id,
+        signed_prekey: SignedPreKeyDto {
+            key_id: signed_prekey.key_id,
+            public_key: signed_prekey.public_key,
+            signature: signed_prekey.signature,
+        },
+        one_time_prekey: one_time_prekey.map(|k| OneTimePreKeyDto {
+            key_id: k.key_id,
+            public_key: k.public_key,
+        }),
+    }))
+}
+
 #[instrument(skip(ws, state))]
 async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -250,7 +406,7 @@ async fn ws_handler(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, HttpError> {
     info!("WS connection attempt");
-    let (user_id, exp) =
+    let (user_id, _role, exp) =
         match verify_access_token(&params.token, state.config.jwt_secret.as_bytes()) {
             Ok(res) => res,
             Err(e) => {
@@ -355,9 +511,11 @@ async fn handle_event(event: ClientReq, state: &AppState, user_id: Uuid) {
             decline_invitation_response(&state, user_id, invitation_id).await
         }
         ClientReq::GetPendingInvitations => get_pending_invitations_response(&state, user_id).await,
-        ClientReq::SendMessage { room_id, content } => {
-            send_message_response(&state, user_id, room_id, content).await
-        }
+        ClientReq::SendMessage {
+            room_id,
+            content,
+            message_type,
+        } => send_message_response(&state, user_id, room_id, content, message_type).await,
         ClientReq::EditMessage {
             message_id,
             new_content,
@@ -1033,8 +1191,15 @@ async fn get_pending_invitations_response(state: &&AppState, user_id: Uuid) {
 }
 
 #[instrument(skip(state), fields(user_id = %user_id))]
-async fn send_message_response(state: &&AppState, user_id: Uuid, room_id: Uuid, content: String) {
+async fn send_message_response(
+    state: &&AppState,
+    user_id: Uuid,
+    room_id: Uuid,
+    content: String,
+    message_type: Option<i32>,
+) {
     info!("User {} is sending message to room {}", user_id, room_id);
+    let message_type = message_type.unwrap_or(1); // Default to 1 (Ciphertext) if not provided
     let room_name = match state.db.get_room_by_id(room_id).await {
         Ok(Some(room)) => room.name,
         Ok(None) => {
@@ -1077,7 +1242,14 @@ async fn send_message_response(state: &&AppState, user_id: Uuid, room_id: Uuid, 
 
     let message = match state
         .db
-        .insert_message(room_id, room_name, author.id, author.username, &content)
+        .insert_message(
+            room_id,
+            room_name,
+            author.id,
+            author.username,
+            &content,
+            message_type,
+        )
         .await
     {
         Ok(message) => message,
@@ -1117,6 +1289,7 @@ async fn send_message_response(state: &&AppState, user_id: Uuid, room_id: Uuid, 
         room_name: message.room_name.clone(),
         author_username: message.author_username,
         content: message.content.clone(),
+        message_type: message.message_type,
         created_at: message.created_at,
     };
 
@@ -1145,6 +1318,7 @@ async fn send_message_response(state: &&AppState, user_id: Uuid, room_id: Uuid, 
             room_id: message.room_id,
             room_name: message.room_name,
             content: message.content,
+            message_type: message.message_type,
             created_at: message.created_at,
         },
     );
@@ -1308,6 +1482,7 @@ async fn get_messages_response(
                         message_id: msg.id,
                         author_username: author.username,
                         content: msg.content,
+                        message_type: msg.message_type,
                         created_at: msg.created_at,
                     });
                 } else {

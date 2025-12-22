@@ -27,3 +27,4 @@ pub const ALREADY_INVITED: &str = "already_invited";
 pub const MESSAGE_NOT_FOUND: &str = "message_not_found";
 pub const NOT_MESSAGE_AUTHOR: &str = "not_message_author";
 pub const INVALID_REQUEST_FORMAT: &str = "invalid_request_format";
+pub const USER_HAS_NO_KEYS: &str = "user_has_no_keys";
