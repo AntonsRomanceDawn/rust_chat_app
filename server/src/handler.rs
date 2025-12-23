@@ -32,10 +32,7 @@ use crate::{
         RefreshTokenRespDto, RegisterReqDto, RegisterRespDto, RoomInfo, ServerResp,
         SignedPreKeyDto, UploadKeysReqDto, UserInfo, WsParams,
     },
-    errors::{
-        error::{ApiErrorItem, HttpError},
-        error_codes::{self, USER_NOT_FOUND},
-    },
+    errors::error::AppError,
     utils::{
         hash::{hash_password, hash_refresh_token, verify_hashed_password},
         token::{
@@ -61,19 +58,18 @@ pub fn handler(state: AppState) -> Router {
 async fn register(
     State(state): State<AppState>,
     Json(body): Json<RegisterReqDto>,
-) -> Result<Json<RegisterRespDto>, HttpError> {
+) -> Result<Json<RegisterRespDto>, AppError> {
     info!("Registering new user");
-    body.validate().map_err(|e| HttpError::bad_request(e))?;
+    body.validate().map_err(AppError::Validation)?;
 
     let password_hash = hash_password(body.password)?;
 
     match state
         .db
         .insert_user(&body.username, &password_hash, UserRole::User)
-        .await
+        .await?
     {
-        Ok(Some(user)) => {
-            info!("User registered successfully: {}", user.username);
+        Some(user) => {
             let register_response = RegisterRespDto {
                 id: user.id,
                 username: user.username,
@@ -82,23 +78,7 @@ async fn register(
             };
             Ok(Json::<RegisterRespDto>(register_response))
         }
-        Ok(None) => {
-            warn!(
-                "Registration failed: Username {} already exists",
-                body.username
-            );
-            Err(HttpError::bad_request([ApiErrorItem::new(
-                error_codes::USERNAME_ALREADY_EXISTS,
-                None,
-            )]))
-        }
-        Err(e) => {
-            error!("Registration failed: {:?}", e);
-            return Err(HttpError::internal([ApiErrorItem::new(
-                error_codes::INTERNAL_SERVER_ERROR,
-                None,
-            )]));
-        }
+        None => Err(AppError::UsernameAlreadyExists),
     }
 }
 
@@ -106,39 +86,16 @@ async fn register(
 async fn login(
     State(state): State<AppState>,
     Json(body): Json<LoginReqDto>,
-) -> Result<Json<LoginRespDto>, HttpError> {
+) -> Result<Json<LoginRespDto>, AppError> {
     info!("User logging in");
-    body.validate().map_err(|e| HttpError::bad_request(e))?;
-    let user = match state.db.get_user_by_username(&body.username).await {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            warn!(
-                "Login failed: Wrong credentials for username {}",
-                body.username
-            );
-            return Err(HttpError::bad_request([ApiErrorItem::new(
-                error_codes::WRONG_CREDENTIALS,
-                None,
-            )]));
-        }
-        Err(e) => {
-            error!("Login failed: {:?}", e);
-            return Err(HttpError::internal([ApiErrorItem::new(
-                error_codes::INTERNAL_SERVER_ERROR,
-                None,
-            )]));
-        }
+    body.validate().map_err(AppError::Validation)?;
+    let user = match state.db.get_user_by_username(&body.username).await? {
+        Some(user) => user,
+        None => return Err(AppError::WrongCredentials),
     };
 
     if !verify_hashed_password(&body.password, &user.password_hash)? {
-        warn!(
-            "Login failed: Wrong credentials for username {}",
-            body.username
-        );
-        return Err(HttpError::bad_request([ApiErrorItem::new(
-            error_codes::WRONG_CREDENTIALS,
-            None,
-        )]));
+        return Err(AppError::WrongCredentials);
     }
 
     let access_token = generate_access_token(
@@ -157,11 +114,7 @@ async fn login(
             &refresh_token_hash,
             Duration::seconds(state.config.refresh_expiry),
         )
-        .await
-        .map_err(|e| {
-            error!("Failed to insert refresh token: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?;
+        .await?;
 
     let login_response = LoginRespDto {
         access_token,
@@ -174,42 +127,19 @@ async fn login(
 async fn refresh_token(
     State(state): State<AppState>,
     Json(body): Json<RefreshTokenReqDto>,
-) -> Result<Json<RefreshTokenRespDto>, HttpError> {
+) -> Result<Json<RefreshTokenRespDto>, AppError> {
     info!("Refreshing token");
     let refresh_token_hash = hash_refresh_token(&body.refresh_token);
     let refresh_token = match state
         .db
         .get_refresh_token_by_hash(&refresh_token_hash)
-        .await
+        .await?
     {
-        Ok(Some(token)) => token,
-        Ok(None) => {
-            warn!(
-                "Refresh token not found or expired for hash {}",
-                refresh_token_hash
-            );
-            return Err(HttpError::unauthorized([ApiErrorItem::new(
-                error_codes::SESSION_EXPIRED,
-                None,
-            )]));
-        }
-        Err(e) => {
-            error!("Failed to get refresh token: {:?}", e);
-            return Err(HttpError::internal([ApiErrorItem::new(
-                error_codes::INTERNAL_SERVER_ERROR,
-                None,
-            )]));
-        }
+        Some(token) => token,
+        None => return Err(AppError::SessionExpired),
     };
     if refresh_token.expires_at < Utc::now() {
-        warn!(
-            "Refresh token not found or expired for hash {}",
-            refresh_token_hash
-        );
-        return Err(HttpError::unauthorized([ApiErrorItem::new(
-            error_codes::SESSION_EXPIRED,
-            None,
-        )]));
+        return Err(AppError::SessionExpired);
     }
 
     let user_id = refresh_token.user_id;
@@ -217,11 +147,7 @@ async fn refresh_token(
     let _ = state
         .db
         .delete_refresh_token_by_hash(&refresh_token_hash)
-        .await
-        .map_err(|e| {
-            error!("Failed to delete refresh token: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?;
+        .await?;
 
     let access_token = generate_access_token(
         user_id,
@@ -239,11 +165,7 @@ async fn refresh_token(
             &refresh_token_hash,
             Duration::seconds(state.config.refresh_expiry),
         )
-        .await
-        .map_err(|e| {
-            error!("Failed to insert refresh token: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?;
+        .await?;
 
     let refresh_response = RefreshTokenRespDto {
         access_token,
@@ -257,18 +179,14 @@ async fn upload_keys(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<UploadKeysReqDto>,
-) -> Result<(), HttpError> {
+) -> Result<(), AppError> {
     info!("Uploading keys");
     let (user_id, _, _) = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
 
     let _ = state
         .db
         .upsert_identity_key(user_id, body.identity_key, body.registration_id)
-        .await
-        .map_err(|e| {
-            error!("Failed to upsert identity key: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?;
+        .await?;
 
     let _ = state
         .db
@@ -278,11 +196,7 @@ async fn upload_keys(
             body.signed_prekey.public_key,
             body.signed_prekey.signature,
         )
-        .await
-        .map_err(|e| {
-            error!("Failed to upsert signed prekey: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?;
+        .await?;
 
     let ot_keys = body
         .one_time_prekeys
@@ -290,14 +204,7 @@ async fn upload_keys(
         .map(|k| (k.key_id, k.public_key))
         .collect();
 
-    let _ = state
-        .db
-        .upload_one_time_prekeys(user_id, ot_keys)
-        .await
-        .map_err(|e| {
-            error!("Failed to upload one-time prekeys: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?;
+    state.db.upload_one_time_prekeys(user_id, ot_keys).await?;
 
     Ok(())
 }
@@ -306,17 +213,11 @@ async fn upload_keys(
 async fn get_key_count(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<KeyCountRespDto>, HttpError> {
+) -> Result<Json<KeyCountRespDto>, AppError> {
+    info!("Getting prekey bundle count");
     let (user_id, _, _) = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
 
-    let count = state
-        .db
-        .get_prekey_bundle_counts(user_id)
-        .await
-        .map_err(|e| {
-            error!("Failed to get key count: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?;
+    let count = state.db.get_prekey_bundle_counts(user_id).await?;
 
     Ok(Json(KeyCountRespDto { count }))
 }
@@ -326,63 +227,37 @@ async fn get_prekey_bundle(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(username): Path<String>,
-) -> Result<Json<PreKeyBundleRespDto>, HttpError> {
+) -> Result<Json<PreKeyBundleRespDto>, AppError> {
+    info!("Getting prekey bundle for user: {}", username);
     let _ = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
 
-    let user = match state.db.get_user_by_username(&username).await {
-        Ok(Some(user)) => user,
-        Ok(None) => {
+    let user = match state.db.get_user_by_username(&username).await? {
+        Some(user) => user,
+        None => {
             warn!("User not found: {}", username);
-            return Err(HttpError::bad_request([ApiErrorItem::new(
-                USER_NOT_FOUND,
-                None,
-            )]));
-        }
-        Err(e) => {
-            error!("Failed to get user by username: {:?}", e);
-            return Err(HttpError::internal([ApiErrorItem::new(
-                error_codes::INTERNAL_SERVER_ERROR,
-                None,
-            )]));
+            return Err(AppError::UserNotFound);
         }
     };
 
     let user_id = user.id;
 
-    let identity_key = state
-        .db
-        .get_identity_key(user_id)
-        .await
-        .map_err(|e| {
-            error!("Failed to get identity key: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?
-        .ok_or_else(|| {
+    let identity_key = match state.db.get_identity_key(user_id).await? {
+        Some(key) => key,
+        None => {
             warn!("User {} has no identity key", user_id);
-            HttpError::bad_request([ApiErrorItem::new(error_codes::USER_HAS_NO_KEYS, None)])
-        })?;
+            return Err(AppError::UserHasNoKeys);
+        }
+    };
 
-    let signed_prekey = state
-        .db
-        .get_signed_prekey(user_id)
-        .await
-        .map_err(|e| {
-            error!("Failed to get signed prekey: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?
-        .ok_or_else(|| {
+    let signed_prekey = match state.db.get_signed_prekey(user_id).await? {
+        Some(key) => key,
+        None => {
             warn!("User {} has no signed prekey", user_id);
-            HttpError::bad_request([ApiErrorItem::new(error_codes::USER_HAS_NO_KEYS, None)])
-        })?;
+            return Err(AppError::UserHasNoKeys);
+        }
+    };
 
-    let one_time_prekey = state
-        .db
-        .consume_one_time_prekey(user_id)
-        .await
-        .map_err(|e| {
-            error!("Failed to consume one-time prekey: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
-        })?;
+    let one_time_prekey = state.db.consume_one_time_prekey(user_id).await?;
 
     Ok(Json(PreKeyBundleRespDto {
         identity_key: identity_key.identity_key,
@@ -404,7 +279,7 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<WsParams>,
     State(state): State<AppState>,
-) -> Result<impl IntoResponse, HttpError> {
+) -> Result<impl IntoResponse, AppError> {
     info!("WS connection attempt");
     let (user_id, _role, exp) =
         match verify_access_token(&params.token, state.config.jwt_secret.as_bytes()) {
@@ -445,8 +320,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, user_id: Uuid, exp: u
                         handle_event(event, &state_clone, user_id).await;
                     }
                     Err(_) => {
-                        let _ =
-                            send_error(&state_clone, user_id, error_codes::INVALID_REQUEST_FORMAT);
+                        let _ = send_error(&state_clone, user_id, AppError::InvalidRequestFormat);
                     }
                 },
                 Message::Binary(_) => {}
@@ -543,7 +417,7 @@ async fn create_room_response(state: &&AppState, user_id: Uuid, name: String) {
         Ok(Some(user)) => user.username,
         _ => {
             error!("Failed to get user by id: {}", user_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -563,7 +437,7 @@ async fn create_room_response(state: &&AppState, user_id: Uuid, name: String) {
         }
         Err(e) => {
             error!("Failed to create room: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -582,12 +456,12 @@ async fn join_room_response(state: &&AppState, user_id: Uuid, invitation_id: Uui
                 "No pending invitation found for invitation id {}",
                 invitation_id
             );
-            let _ = send_error(state, user_id, error_codes::NO_PENDING_INVITATION);
+            let _ = send_error(state, user_id, AppError::NoPendingInvitation);
             return;
         }
         Err(e) => {
             error!("Failed to get invitation by id: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -596,7 +470,7 @@ async fn join_room_response(state: &&AppState, user_id: Uuid, invitation_id: Uui
         Ok(Some(room)) => room,
         _ => {
             error!("Failed to get room by id: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -605,14 +479,14 @@ async fn join_room_response(state: &&AppState, user_id: Uuid, invitation_id: Uui
         Ok(members) => members,
         Err(e) => {
             error!("Failed to get room members: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
 
     if members.iter().any(|m| m.user_id == user_id) {
         warn!("User {} is already a member of room {}", user_id, room_id);
-        let _ = send_error(state, user_id, error_codes::ALREADY_ROOM_MEMBER);
+        let _ = send_error(state, user_id, AppError::AlreadyRoomMember);
         return;
     }
 
@@ -624,7 +498,7 @@ async fn join_room_response(state: &&AppState, user_id: Uuid, invitation_id: Uui
         Some(username) => username,
         None => {
             error!("Admin user not found in members for room {}", room_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -633,7 +507,7 @@ async fn join_room_response(state: &&AppState, user_id: Uuid, invitation_id: Uui
         Ok(Some(user)) => user.username,
         _ => {
             error!("Failed to get creator user by id: {}", room.creator_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -642,7 +516,7 @@ async fn join_room_response(state: &&AppState, user_id: Uuid, invitation_id: Uui
         Ok(Some(user)) => user.username,
         _ => {
             error!("Failed to get invitee user by id: {}", user_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -661,7 +535,7 @@ async fn join_room_response(state: &&AppState, user_id: Uuid, invitation_id: Uui
         .await
         .map_err(|e| {
             error!("Failed to consume invitation and join room: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
         });
 
     let event = ServerResp::MemberJoined {
@@ -697,12 +571,12 @@ async fn leave_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid) {
     let _ = match state.db.get_room_by_id(room_id).await {
         Ok(None) => {
             warn!("Room not found: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::ROOM_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::RoomNotFound);
             return;
         }
         Err(e) => {
             error!("Failed to get room by id: {}: {:?}", room_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         Ok(Some(_)) => {}
@@ -711,12 +585,12 @@ async fn leave_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid) {
     let _ = match state.db.is_member(room_id, user_id).await {
         Ok(false) => {
             warn!("User {} is not a member of room {}", user_id, room_id);
-            let _ = send_error(state, user_id, error_codes::NOT_ROOM_MEMBER);
+            let _ = send_error(state, user_id, AppError::NotRoomMember);
             return;
         }
         Err(e) => {
             error!("Failed to check if user is a member of room: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         _ => {}
@@ -736,7 +610,7 @@ async fn leave_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid) {
         }
         _ => {
             error!("Failed to leave room: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
         }
     };
 }
@@ -747,12 +621,12 @@ async fn update_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid, n
     let _ = match state.db.get_room_by_id(room_id).await {
         Ok(None) => {
             warn!("Room not found: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::ROOM_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::RoomNotFound);
             return;
         }
         Err(e) => {
             error!("Failed to get room by id: {}: {:?}", room_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         Ok(Some(_)) => {}
@@ -761,12 +635,12 @@ async fn update_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid, n
     let _ = match state.db.is_admin(room_id, user_id).await {
         Ok(false) => {
             warn!("User {} is not an admin of room {}", user_id, room_id);
-            let _ = send_error(state, user_id, error_codes::NOT_ROOM_ADMIN);
+            let _ = send_error(state, user_id, AppError::NotRoomAdmin);
             return;
         }
         Err(e) => {
             error!("Failed to check if user is an admin of room: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         _ => {}
@@ -785,12 +659,12 @@ async fn update_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid, n
                 }
             } else {
                 error!("Failed to get members of room: {}", room_id);
-                let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+                let _ = send_error(state, user_id, AppError::Internal);
                 return;
             }
         }
         _ => {
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
         }
     };
 }
@@ -801,12 +675,12 @@ async fn delete_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid) {
     let _ = match state.db.get_room_by_id(room_id).await {
         Ok(None) => {
             warn!("Room not found: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::ROOM_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::RoomNotFound);
             return;
         }
         Err(e) => {
             error!("Failed to get room by id: {}: {:?}", room_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         Ok(Some(_)) => {}
@@ -815,12 +689,12 @@ async fn delete_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid) {
     let _ = match state.db.is_admin(room_id, user_id).await {
         Ok(false) => {
             warn!("User {} is not an admin of room {}", user_id, room_id);
-            let _ = send_error(state, user_id, error_codes::NOT_ROOM_ADMIN);
+            let _ = send_error(state, user_id, AppError::NotRoomAdmin);
             return;
         }
         Err(e) => {
             error!("Failed to check if user is an admin of room: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         _ => {}
@@ -839,13 +713,13 @@ async fn delete_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid) {
                 }
             } else {
                 error!("Failed to get members of room: {}", room_id);
-                let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+                let _ = send_error(state, user_id, AppError::Internal);
                 return;
             }
         }
         _ => {
             error!("Failed to delete room: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
         }
     };
 }
@@ -857,12 +731,12 @@ async fn get_room_info_response(state: &&AppState, user_id: Uuid, room_id: Uuid)
         Ok(Some(room)) => room,
         Ok(None) => {
             warn!("Room not found: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::ROOM_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::RoomNotFound);
             return;
         }
         Err(e) => {
             error!("Failed to get room by id: {}: {:?}", room_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -871,7 +745,7 @@ async fn get_room_info_response(state: &&AppState, user_id: Uuid, room_id: Uuid)
         Ok(members) => members,
         Err(e) => {
             error!("Failed to get members of room: {}: {:?}", room_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -884,7 +758,7 @@ async fn get_room_info_response(state: &&AppState, user_id: Uuid, room_id: Uuid)
         Some(username) => username,
         None => {
             error!("Admin user not found in members for room: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -893,7 +767,7 @@ async fn get_room_info_response(state: &&AppState, user_id: Uuid, room_id: Uuid)
         Ok(Some(user)) => user.username,
         _ => {
             error!("Failed to get creator user by id: {}", room.creator_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -939,7 +813,7 @@ async fn get_rooms_info_response(state: &&AppState, user_id: Uuid) {
         }
         Err(e) => {
             error!("Failed to get user rooms for user {}: {:?}", user_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -955,12 +829,12 @@ async fn invite_response(state: &&AppState, user_id: Uuid, room_id: Uuid, userna
         Ok(Some(room)) => room.name,
         Ok(None) => {
             warn!("Room not found: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::ROOM_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::RoomNotFound);
             return;
         }
         Err(e) => {
             error!("Failed to get room by id: {}: {:?}", room_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -969,12 +843,12 @@ async fn invite_response(state: &&AppState, user_id: Uuid, room_id: Uuid, userna
         Ok(Some(user)) => user,
         Ok(None) => {
             warn!("Invite failed: User {} not found", username);
-            let _ = send_error(state, user_id, error_codes::USER_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::UserNotFound);
             return;
         }
         Err(e) => {
             error!("Failed to get user by username: {}: {:?}", username, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -985,12 +859,12 @@ async fn invite_response(state: &&AppState, user_id: Uuid, room_id: Uuid, userna
                 "Invite failed: User {} is already a member of room {}",
                 username, room_id
             );
-            let _ = send_error(state, user_id, error_codes::TARGET_ALREADY_ROOM_MEMBER);
+            let _ = send_error(state, user_id, AppError::TargetAlreadyRoomMember);
             return;
         }
         Err(e) => {
             error!("Database error checking membership: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         _ => {}
@@ -1000,7 +874,7 @@ async fn invite_response(state: &&AppState, user_id: Uuid, room_id: Uuid, userna
         Ok(Some(user)) => user,
         _ => {
             error!("Failed to get inviter user {}", user_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1011,12 +885,12 @@ async fn invite_response(state: &&AppState, user_id: Uuid, room_id: Uuid, userna
                 "Invite failed: Inviter {} is not a member of room {}",
                 user_id, room_id
             );
-            let _ = send_error(state, user_id, error_codes::NOT_ROOM_MEMBER);
+            let _ = send_error(state, user_id, AppError::NotRoomMember);
             return;
         }
         Err(e) => {
             error!("Database error checking inviter membership: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         _ => {}
@@ -1065,11 +939,11 @@ async fn invite_response(state: &&AppState, user_id: Uuid, room_id: Uuid, userna
                 "Invite failed: User {} has already been invited to room {}",
                 username, room_id
             );
-            let _ = send_error(state, user_id, error_codes::ALREADY_INVITED);
+            let _ = send_error(state, user_id, AppError::AlreadyInvited);
         }
         Err(e) => {
             error!("Database error creating invitation: {:?}", e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1085,7 +959,7 @@ async fn decline_invitation_response(state: &&AppState, user_id: Uuid, invitatio
         Ok(Some(invitation)) => invitation,
         Ok(None) => {
             warn!("Invitation not found: {}", invitation_id);
-            let _ = send_error(state, user_id, error_codes::INVITATION_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::InvitationNotFound);
             return;
         }
         Err(e) => {
@@ -1093,7 +967,7 @@ async fn decline_invitation_response(state: &&AppState, user_id: Uuid, invitatio
                 "Database error getting invitation by id {}: {:?}",
                 invitation_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1102,7 +976,7 @@ async fn decline_invitation_response(state: &&AppState, user_id: Uuid, invitatio
         Ok(Some(_)) => {}
         _ => {
             error!("Failed to get room by id: {}", invitation.room_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1136,7 +1010,7 @@ async fn decline_invitation_response(state: &&AppState, user_id: Uuid, invitatio
                 "No pending invitation found to decline for invitation id {}",
                 invitation_id
             );
-            let _ = send_error(state, user_id, error_codes::NO_PENDING_INVITATION);
+            let _ = send_error(state, user_id, AppError::NoPendingInvitation);
             return;
         }
         Err(e) => {
@@ -1144,7 +1018,7 @@ async fn decline_invitation_response(state: &&AppState, user_id: Uuid, invitatio
                 "Database error updating invitation status for id {}: {:?}",
                 invitation_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1184,7 +1058,7 @@ async fn get_pending_invitations_response(state: &&AppState, user_id: Uuid) {
                 "Database error getting pending invitations for user {}: {:?}",
                 user_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1204,12 +1078,12 @@ async fn send_message_response(
         Ok(Some(room)) => room.name,
         Ok(None) => {
             warn!("Room not found: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::ROOM_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::RoomNotFound);
             return;
         }
         Err(e) => {
             error!("Database error getting room by id {}: {:?}", room_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1217,7 +1091,7 @@ async fn send_message_response(
     let _ = match state.db.is_member(room_id, user_id).await {
         Ok(false) => {
             warn!("User {} is not a member of room {}", user_id, room_id);
-            let _ = send_error(state, user_id, error_codes::NOT_ROOM_MEMBER);
+            let _ = send_error(state, user_id, AppError::NotRoomMember);
             return;
         }
         Err(e) => {
@@ -1225,7 +1099,7 @@ async fn send_message_response(
                 "Database error checking membership for user {} in room {}: {:?}",
                 user_id, room_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         _ => {}
@@ -1235,7 +1109,7 @@ async fn send_message_response(
         Ok(Some(user)) => user,
         _ => {
             error!("Failed to get author user {}", user_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1258,7 +1132,7 @@ async fn send_message_response(
                 "Database error inserting message in room {}: {:?}",
                 room_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1273,7 +1147,7 @@ async fn send_message_response(
                 "Database error getting members for room {}: {:?}",
                 room_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1336,7 +1210,7 @@ async fn edit_message_response(
         Ok(Some(message)) => message,
         Ok(None) => {
             warn!("Message not found: {}", message_id);
-            let _ = send_error(state, user_id, error_codes::MESSAGE_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::MessageNotFound);
             return;
         }
         Err(e) => {
@@ -1344,7 +1218,7 @@ async fn edit_message_response(
                 "Database error getting message by id {}: {:?}",
                 message_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1354,7 +1228,7 @@ async fn edit_message_response(
             "User {} is not the author of message {}",
             user_id, message_id
         );
-        let _ = send_error(state, user_id, error_codes::NOT_MESSAGE_AUTHOR);
+        let _ = send_error(state, user_id, AppError::NotMessageAuthor);
         return;
     }
 
@@ -1378,7 +1252,7 @@ async fn edit_message_response(
                     "Database error getting members for room {}",
                     updated_message.room_id
                 );
-                let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+                let _ = send_error(state, user_id, AppError::Internal);
                 return;
             }
         }
@@ -1387,7 +1261,7 @@ async fn edit_message_response(
                 "Database error updating message content for message {}",
                 message_id
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
         }
     };
 }
@@ -1399,7 +1273,7 @@ async fn delete_message_response(state: &&AppState, user_id: Uuid, message_id: U
         Ok(Some(_)) => {}
         Ok(None) => {
             warn!("Message not found: {}", message_id);
-            let _ = send_error(state, user_id, error_codes::MESSAGE_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::MessageNotFound);
             return;
         }
         Err(e) => {
@@ -1407,7 +1281,7 @@ async fn delete_message_response(state: &&AppState, user_id: Uuid, message_id: U
                 "Database error getting message by id {}: {:?}",
                 message_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1425,13 +1299,13 @@ async fn delete_message_response(state: &&AppState, user_id: Uuid, message_id: U
                     "Database error getting members for room {}",
                     message.room_id
                 );
-                let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+                let _ = send_error(state, user_id, AppError::Internal);
                 return;
             }
         }
         _ => {
             error!("Database error deleting message {}", message_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
         }
     };
 }
@@ -1452,12 +1326,12 @@ async fn get_messages_response(
         Ok(Some(room)) => room.name,
         Ok(None) => {
             warn!("Room not found: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::ROOM_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::RoomNotFound);
             return;
         }
         Err(e) => {
             error!("Database error getting room by id {}: {:?}", room_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1487,7 +1361,7 @@ async fn get_messages_response(
                     });
                 } else {
                     error!("Database error getting user by id {}", msg.author_id);
-                    let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+                    let _ = send_error(state, user_id, AppError::Internal);
                     return;
                 }
             }
@@ -1508,7 +1382,7 @@ async fn get_messages_response(
             );
         }
         Err(_) => {
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
         }
     };
 }
@@ -1527,7 +1401,7 @@ async fn delete_account_response(state: &&AppState, user_id: Uuid) {
         }
         _ => {
             error!("Failed to delete user account for user {}", user_id);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1542,12 +1416,12 @@ async fn kick_member_response(state: &&AppState, user_id: Uuid, room_id: Uuid, u
         Ok(Some(room)) => room.name,
         Ok(None) => {
             warn!("Room not found: {}", room_id);
-            let _ = send_error(state, user_id, error_codes::ROOM_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::RoomNotFound);
             return;
         }
         Err(e) => {
             error!("Database error getting room by id {}: {:?}", room_id, e);
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1555,7 +1429,7 @@ async fn kick_member_response(state: &&AppState, user_id: Uuid, room_id: Uuid, u
     let _ = match state.db.is_admin(room_id, user_id).await {
         Ok(false) => {
             warn!("User {} is not an admin of room {}", user_id, room_id);
-            let _ = send_error(state, user_id, error_codes::NOT_ROOM_ADMIN);
+            let _ = send_error(state, user_id, AppError::NotRoomAdmin);
             return;
         }
         Err(e) => {
@@ -1563,7 +1437,7 @@ async fn kick_member_response(state: &&AppState, user_id: Uuid, room_id: Uuid, u
                 "Database error checking admin status for user {} in room {}: {:?}",
                 user_id, room_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
         _ => {}
@@ -1573,7 +1447,7 @@ async fn kick_member_response(state: &&AppState, user_id: Uuid, room_id: Uuid, u
         Ok(Some(user)) => user,
         Ok(None) => {
             warn!("User not found: {}", username);
-            let _ = send_error(state, user_id, error_codes::USER_NOT_FOUND);
+            let _ = send_error(state, user_id, AppError::UserNotFound);
             return;
         }
         Err(e) => {
@@ -1581,7 +1455,7 @@ async fn kick_member_response(state: &&AppState, user_id: Uuid, room_id: Uuid, u
                 "Database error getting user by username {}: {:?}",
                 username, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1600,7 +1474,7 @@ async fn kick_member_response(state: &&AppState, user_id: Uuid, room_id: Uuid, u
                 }
             } else {
                 error!("Database error getting members for room {}", room_id);
-                let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+                let _ = send_error(state, user_id, AppError::Internal);
                 return;
             }
             let event = ServerResp::MemberKicked {
@@ -1615,7 +1489,7 @@ async fn kick_member_response(state: &&AppState, user_id: Uuid, room_id: Uuid, u
                 "User {} is not a member of room {}",
                 member.username, room_id
             );
-            let _ = send_error(state, user_id, error_codes::TARGET_NOT_ROOM_MEMBER);
+            let _ = send_error(state, user_id, AppError::TargetNotRoomMember);
             return;
         }
         Err(e) => {
@@ -1623,7 +1497,7 @@ async fn kick_member_response(state: &&AppState, user_id: Uuid, room_id: Uuid, u
                 "Database error removing member {} from room {}: {:?}",
                 member.username, room_id, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
             return;
         }
     };
@@ -1657,7 +1531,7 @@ async fn search_users_response(state: &&AppState, user_id: Uuid, query: String) 
                 "Database error searching users with query '{}': {:?}",
                 query, e
             );
-            let _ = send_error(state, user_id, error_codes::INTERNAL_SERVER_ERROR);
+            let _ = send_error(state, user_id, AppError::Internal);
         }
     };
 }
@@ -1668,12 +1542,12 @@ fn send_event(state: &AppState, user_id: Uuid, event: ServerResp) {
     }
 }
 
-fn send_error(state: &AppState, user_id: Uuid, code: &'static str) {
+fn send_error(state: &AppState, user_id: Uuid, error: AppError) {
     send_event(
         state,
         user_id,
         ServerResp::Error {
-            errors: vec![ApiErrorItem::new(code, None)],
+            errors: error.to_api_errors(),
         },
     );
 }

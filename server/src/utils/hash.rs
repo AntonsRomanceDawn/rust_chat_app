@@ -5,13 +5,10 @@ use scrypt::{
 use sha2::{Digest, Sha256};
 use tracing::{error, instrument};
 
-use crate::errors::{
-    error::{ApiErrorItem, HttpError},
-    error_codes,
-};
+use crate::errors::error::AppError;
 
 #[instrument(skip(password))]
-pub fn hash_password(password: impl Into<String>) -> Result<String, HttpError> {
+pub fn hash_password(password: impl Into<String>) -> Result<String, AppError> {
     let password = password.into();
 
     let salt = SaltString::generate(&mut OsRng);
@@ -20,17 +17,17 @@ pub fn hash_password(password: impl Into<String>) -> Result<String, HttpError> {
         .hash_password(password.as_bytes(), &salt)
         .map_err(|e| {
             error!("Failed to hash password: {:?}", e);
-            HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+            AppError::Internal
         })?;
 
     Ok(hashed_password.to_string())
 }
 
 #[instrument(skip(password, password_hash))]
-pub fn verify_hashed_password(password: &str, password_hash: &str) -> Result<bool, HttpError> {
+pub fn verify_hashed_password(password: &str, password_hash: &str) -> Result<bool, AppError> {
     let stored_hash = PasswordHash::new(password_hash).map_err(|e| {
         error!("Failed to parse stored password hash: {:?}", e);
-        HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+        AppError::Internal
     })?;
 
     let is_valid = Scrypt

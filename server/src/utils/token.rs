@@ -5,10 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, instrument, warn};
 use uuid::Uuid;
 
-use crate::{
-    database::models::UserRole,
-    errors::{error::ApiErrorItem, error::HttpError, error_codes},
-};
+use crate::{database::models::UserRole, errors::error::AppError};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 
 #[derive(Serialize, Deserialize)]
@@ -25,7 +22,7 @@ pub fn generate_access_token(
     role: UserRole,
     secret: &[u8],
     expires_in_seconds: i64,
-) -> Result<String, HttpError> {
+) -> Result<String, AppError> {
     let now = Utc::now();
     let iat = now.timestamp() as usize;
     let exp = (now + Duration::seconds(expires_in_seconds)).timestamp() as usize;
@@ -43,7 +40,7 @@ pub fn generate_access_token(
     )
     .map_err(|e| {
         error!("Failed to generate access token: {:?}", e);
-        HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+        AppError::Internal
     })
 }
 
@@ -51,21 +48,21 @@ pub fn generate_access_token(
 pub fn extract_and_verify_token(
     headers: &axum::http::HeaderMap,
     secret: &[u8],
-) -> Result<(Uuid, UserRole, usize), HttpError> {
+) -> Result<(Uuid, UserRole, usize), AppError> {
     let token = headers
         .get("Authorization")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .ok_or_else(|| {
             warn!("Authorization header missing or malformed");
-            HttpError::unauthorized([ApiErrorItem::new(error_codes::INVALID_TOKEN, None)])
+            AppError::InvalidToken
         })?;
 
     verify_access_token(token, secret)
 }
 
 #[instrument]
-pub fn generate_refresh_token() -> Result<String, HttpError> {
+pub fn generate_refresh_token() -> Result<String, AppError> {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&bytes))
@@ -74,7 +71,7 @@ pub fn generate_refresh_token() -> Result<String, HttpError> {
 pub fn verify_access_token(
     token: &str,
     secret: &[u8],
-) -> Result<(Uuid, UserRole, usize), HttpError> {
+) -> Result<(Uuid, UserRole, usize), AppError> {
     let result = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret),
@@ -85,17 +82,14 @@ pub fn verify_access_token(
         Ok(token_data) => {
             let user_id = Uuid::parse_str(&token_data.claims.sub).map_err(|e| {
                 error!("Failed to parse user ID from token claims: {:?}", e);
-                HttpError::internal([ApiErrorItem::new(error_codes::INTERNAL_SERVER_ERROR, None)])
+                AppError::Internal
             })?;
             Ok((user_id, token_data.claims.role, token_data.claims.exp))
         }
 
         Err(e) => {
             warn!("Failed to verify access token: {:?}", e);
-            Err(HttpError::unauthorized([ApiErrorItem::new(
-                error_codes::INVALID_TOKEN,
-                None,
-            )]))
+            Err(AppError::InvalidToken)
         }
     }
 }
