@@ -66,6 +66,7 @@ function App() {
     const [searchQuery, setSearchQuery] = useState('');
     const [showInvitePopover, setShowInvitePopover] = useState(false);
     const [showRoomInfo, setShowRoomInfo] = useState(false);
+    const [activeTab, setActiveTab] = useState<'rooms' | 'invitations'>('rooms');
 
     useEffect(() => {
         if (notification) {
@@ -223,65 +224,101 @@ function App() {
             <div className="flex flex-1 overflow-hidden">
                 {/* Sidebar */}
                 <aside className="w-64 bg-white border-r flex flex-col">
-                    <div className="p-4 border-b">
-                        <h3 className="font-semibold mb-2">Create Room</h3>
-                        <form onSubmit={handleCreateRoom} className="flex gap-2">
-                            <input
-                                type="text"
-                                placeholder="Room Name"
-                                className="flex-1 p-1 border rounded text-sm"
-                                value={newRoomName}
-                                onChange={e => setNewRoomName(e.target.value)}
-                            />
-                            <button type="submit" className="bg-green-500 text-white px-2 rounded text-sm">+</button>
-                        </form>
+                    {/* Tabs */}
+                    <div className="flex border-b">
+                        <button
+                            className={`flex-1 py-3 text-sm font-medium text-center ${activeTab === 'rooms' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                            onClick={() => setActiveTab('rooms')}
+                        >
+                            Rooms
+                        </button>
+                        <button
+                            className={`flex-1 py-3 text-sm font-medium text-center relative ${activeTab === 'invitations' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                            onClick={() => setActiveTab('invitations')}
+                        >
+                            Invitations
+                            {invitations.length > 0 && (
+                                <span className="absolute top-2 right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                                    {invitations.length}
+                                </span>
+                            )}
+                        </button>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-4">
-                        <h3 className="font-semibold mb-2 text-gray-500 uppercase text-xs">Rooms</h3>
-                        <ul className="space-y-1">
-                            {rooms.map(room => (
-                                <li
-                                    key={room.room_id}
-                                    onClick={() => {
-                                        setCurrentRoom(room.room_id);
-                                        clearUnread(room.room_id);
-                                        send({ type: 'get_messages', room_id: room.room_id, limit: 50, offset: 0 });
-                                    }}
-                                    className={`p-2 rounded cursor-pointer flex justify-between items-center ${currentRoom === room.room_id ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
-                                >
-                                    <span># {room.room_name}</span>
-                                    {unreadCounts[room.room_id] > 0 && (
-                                        <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                                            {unreadCounts[room.room_id]}
-                                        </span>
+                    <div className="flex-1 overflow-hidden flex flex-col">
+                        {activeTab === 'rooms' ? (
+                            <>
+                                <div className="p-4 border-b bg-gray-50">
+                                    <h3 className="font-semibold mb-2 text-xs uppercase text-gray-500">Create Room</h3>
+                                    <form onSubmit={handleCreateRoom} className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            placeholder="Room Name"
+                                            className="flex-1 p-2 border rounded text-sm focus:outline-none focus:border-blue-500"
+                                            value={newRoomName}
+                                            onChange={e => setNewRoomName(e.target.value)}
+                                        />
+                                        <button type="submit" className="bg-blue-500 text-white w-10 rounded hover:bg-blue-600 transition-colors flex items-center justify-center text-xl font-bold pb-1">+</button>
+                                    </form>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-2">
+                                    {rooms.length === 0 ? (
+                                        <p className="text-center text-gray-400 text-sm mt-4">No rooms yet.</p>
+                                    ) : (
+                                        <ul className="space-y-1">
+                                            {rooms.map(room => (
+                                                <li
+                                                    key={room.room_id}
+                                                    onClick={() => {
+                                                        setCurrentRoom(room.room_id);
+                                                        clearUnread(room.room_id);
+                                                        send({ type: 'get_messages', room_id: room.room_id, limit: 50, offset: 0 });
+                                                    }}
+                                                    className={`p-2 rounded cursor-pointer flex justify-between items-center transition-colors ${currentRoom === room.room_id ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
+                                                >
+                                                    <span className="truncate font-medium"># {room.room_name}</span>
+                                                    {unreadCounts[room.room_id] > 0 && (
+                                                        <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                                                            {unreadCounts[room.room_id]}
+                                                        </span>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ul>
                                     )}
-                                </li>
-                            ))}
-                        </ul>
-
-                        <h3 className="font-semibold mt-6 mb-2 text-gray-500 uppercase text-xs">Invitations</h3>
-                        <ul className="space-y-2">
-                            {invitations.map(inv => (
-                                <li key={inv.invitation_id} className="p-2 bg-yellow-50 border border-yellow-100 rounded text-sm">
-                                    <p><strong>{inv.inviter_username}</strong> invited you to <strong>{inv.room_name}</strong></p>
-                                    <div className="flex gap-2 mt-2">
-                                        <button
-                                            onClick={() => send({ type: 'join_room', invitation_id: inv.invitation_id })}
-                                            className="bg-green-500 text-white px-2 py-1 rounded text-xs"
-                                        >
-                                            Accept
-                                        </button>
-                                        <button
-                                            onClick={() => send({ type: 'decline_invitation', invitation_id: inv.invitation_id })}
-                                            className="bg-red-500 text-white px-2 py-1 rounded text-xs"
-                                        >
-                                            Decline
-                                        </button>
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="flex-1 overflow-y-auto p-4">
+                                {invitations.length === 0 ? (
+                                    <p className="text-center text-gray-400 text-sm mt-4">No pending invitations.</p>
+                                ) : (
+                                    <ul className="space-y-3">
+                                        {invitations.map(inv => (
+                                            <li key={inv.invitation_id} className="p-3 bg-white border border-gray-200 rounded shadow-sm text-sm">
+                                                <p className="mb-2">
+                                                    <span className="font-bold text-blue-600">{inv.inviter_username}</span> invited you to <span className="font-bold">{inv.room_name}</span>
+                                                </p>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => send({ type: 'join_room', invitation_id: inv.invitation_id })}
+                                                        className="flex-1 bg-green-500 text-white py-1.5 rounded text-xs font-medium hover:bg-green-600 transition-colors"
+                                                    >
+                                                        Accept
+                                                    </button>
+                                                    <button
+                                                        onClick={() => send({ type: 'decline_invitation', invitation_id: inv.invitation_id })}
+                                                        className="flex-1 bg-red-500 text-white py-1.5 rounded text-xs font-medium hover:bg-red-600 transition-colors"
+                                                    >
+                                                        Decline
+                                                    </button>
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </aside>
 
@@ -426,7 +463,22 @@ function App() {
                                     {roomDetails.members.map((member, idx) => (
                                         <li key={idx} className="flex justify-between items-center text-sm">
                                             <span>{member.username}</span>
-                                            <span className="text-gray-400 text-xs">{new Date(member.joined_at).toLocaleDateString()}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-gray-400 text-xs">{new Date(member.joined_at).toLocaleDateString()}</span>
+                                                {roomDetails.admin_username === username && member.username !== username && (
+                                                    <button
+                                                        onClick={() => {
+                                                            if (confirm(`Are you sure you want to kick ${member.username}?`)) {
+                                                                send({ type: 'kick_member', room_id: roomDetails.room_id, username: member.username });
+                                                            }
+                                                        }}
+                                                        className="text-red-500 hover:text-red-700 text-xs font-bold ml-2"
+                                                        title="Kick Member"
+                                                    >
+                                                        Kick
+                                                    </button>
+                                                )}
+                                            </div>
                                         </li>
                                     ))}
                                 </ul>

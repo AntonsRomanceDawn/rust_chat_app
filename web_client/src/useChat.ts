@@ -239,6 +239,26 @@ export function useChat(token: string | null, username: string | null, refreshTo
             case 'users_found':
                 setSearchResults(data.users);
                 break;
+            case 'member_kicked':
+                if (data.username === username) {
+                    // I was kicked
+                    setRooms(prev => prev.filter(r => r.room_id !== data.room_id));
+                    if (currentRoomRef.current === data.room_id) {
+                        setCurrentRoom(null);
+                        setRoomDetails(null);
+                    }
+                    setNotification({ message: `You were kicked from ${data.room_name}`, type: 'error' });
+                } else {
+                    // Someone else was kicked
+                    if (roomDetails && roomDetails.room_id === data.room_id) {
+                        setRoomDetails(prev => prev ? {
+                            ...prev,
+                            members: prev.members.filter(m => m.username !== data.username)
+                        } : null);
+                    }
+                    setNotification({ message: `${data.username} was kicked from ${data.room_name}`, type: 'success' });
+                }
+                break;
             case 'error':
                 setError(data.errors.map(e => e.code).join(', '));
                 break;
