@@ -7,6 +7,7 @@ mod utils;
 
 use crate::config::{AppState, Config};
 use crate::database::db::Db;
+use crate::handler::app_router::handler;
 use dashmap::DashMap;
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
@@ -50,7 +51,7 @@ async fn main() {
         channels: Arc::new(DashMap::new()),
     };
 
-    let app = handler::handler(app_state)
+    let app = handler(app_state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
