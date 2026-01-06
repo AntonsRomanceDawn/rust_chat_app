@@ -50,8 +50,7 @@ impl KeyRepository for Db {
         identity_key: String,
         registration_id: i32,
     ) -> Result<IdentityKey, sqlx::Error> {
-        sqlx::query_as!(
-            IdentityKey,
+        sqlx::query_as::<_, IdentityKey>(
             r#"
             INSERT INTO identity_keys (user_id, identity_key, registration_id)
             VALUES ($1, $2, $3)
@@ -61,10 +60,10 @@ impl KeyRepository for Db {
                 created_at = NOW()
             RETURNING *
             "#,
-            user_id,
-            identity_key,
-            registration_id,
         )
+        .bind(user_id)
+        .bind(identity_key)
+        .bind(registration_id)
         .fetch_one(self.pool())
         .await
     }
@@ -77,8 +76,7 @@ impl KeyRepository for Db {
         public_key: String,
         signature: String,
     ) -> Result<SignedPreKey, sqlx::Error> {
-        sqlx::query_as!(
-            SignedPreKey,
+        sqlx::query_as::<_, SignedPreKey>(
             r#"
             INSERT INTO signed_prekeys (id, user_id, key_id, public_key, signature)
             VALUES ($1, $2, $3, $4, $5)
@@ -88,12 +86,12 @@ impl KeyRepository for Db {
                 created_at = NOW()
             RETURNING *
             "#,
-            Uuid::new_v4(),
-            user_id,
-            key_id,
-            public_key,
-            signature,
         )
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(key_id)
+        .bind(public_key)
+        .bind(signature)
         .fetch_one(self.pool())
         .await
     }
@@ -106,16 +104,16 @@ impl KeyRepository for Db {
     ) -> Result<(), sqlx::Error> {
         let (key_ids, public_keys): (Vec<i32>, Vec<String>) = keys.into_iter().unzip();
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO one_time_prekeys (user_id, key_id, public_key)
             SELECT $1, * FROM UNNEST($2::int[], $3::text[])
             ON CONFLICT (user_id, key_id) DO NOTHING
             "#,
-            user_id,
-            &key_ids,
-            &public_keys
         )
+        .bind(user_id)
+        .bind(&key_ids)
+        .bind(&public_keys)
         .execute(self.pool())
         .await?;
 
@@ -124,22 +122,18 @@ impl KeyRepository for Db {
 
     #[instrument(skip(self))]
     async fn get_identity_key(&self, user_id: Uuid) -> Result<Option<IdentityKey>, sqlx::Error> {
-        sqlx::query_as!(
-            IdentityKey,
-            "SELECT * FROM identity_keys WHERE user_id = $1",
-            user_id
-        )
-        .fetch_optional(self.pool())
-        .await
+        sqlx::query_as::<_, IdentityKey>("SELECT * FROM identity_keys WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_optional(self.pool())
+            .await
     }
 
     #[instrument(skip(self))]
     async fn get_signed_prekey(&self, user_id: Uuid) -> Result<Option<SignedPreKey>, sqlx::Error> {
-        sqlx::query_as!(
-            SignedPreKey,
+        sqlx::query_as::<_, SignedPreKey>(
             "SELECT * FROM signed_prekeys WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-            user_id
         )
+        .bind(user_id)
         .fetch_optional(self.pool())
         .await
     }
@@ -149,8 +143,7 @@ impl KeyRepository for Db {
         &self,
         user_id: Uuid,
     ) -> Result<Option<OneTimePreKey>, sqlx::Error> {
-        sqlx::query_as!(
-            OneTimePreKey,
+        sqlx::query_as::<_, OneTimePreKey>(
             r#"
             DELETE FROM one_time_prekeys
             WHERE user_id = $1 AND key_id = (
@@ -162,8 +155,8 @@ impl KeyRepository for Db {
             )
             RETURNING *
             "#,
-            user_id
         )
+        .bind(user_id)
         .fetch_optional(self.pool())
         .await
     }

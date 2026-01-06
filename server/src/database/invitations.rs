@@ -63,8 +63,7 @@ impl InvitationRepository for Db {
         inviter_id: Uuid,
         inviter_username: String,
     ) -> Result<Option<Invitation>, sqlx::Error> {
-        sqlx::query_as!(
-            Invitation,
+        sqlx::query_as::<_, Invitation>(
             r#"
             INSERT INTO invitations (id, room_id, room_name, invitee_id, invitee_username, inviter_id, inviter_username, status, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -72,16 +71,16 @@ impl InvitationRepository for Db {
             DO NOTHING
             RETURNING *
             "#,
-            Uuid::new_v4(),
-            room_id,
-            room_name,
-            invitee_id,
-            invitee_username,
-            inviter_id,
-            inviter_username,
-            InvitationStatus::Pending.to_string(),
-            Utc::now()
         )
+        .bind(Uuid::new_v4())
+        .bind(room_id)
+        .bind(room_name)
+        .bind(invitee_id)
+        .bind(invitee_username)
+        .bind(inviter_id)
+        .bind(inviter_username)
+        .bind(InvitationStatus::Pending.to_string())
+        .bind(Utc::now())
         .fetch_optional(self.pool())
         .await
     }
@@ -92,17 +91,16 @@ impl InvitationRepository for Db {
         invitation_id: Uuid,
         status: InvitationStatus,
     ) -> Result<Option<Invitation>, sqlx::Error> {
-        sqlx::query_as!(
-            Invitation,
+        sqlx::query_as::<_, Invitation>(
             r#"
             UPDATE invitations
             SET status = $1
             WHERE id = $2
             RETURNING *
             "#,
-            status.to_string(),
-            invitation_id
         )
+        .bind(status.to_string())
+        .bind(invitation_id)
         .fetch_optional(self.pool())
         .await
     }
@@ -128,13 +126,12 @@ impl InvitationRepository for Db {
         &self,
         invitation_id: Uuid,
     ) -> Result<Option<Invitation>, sqlx::Error> {
-        sqlx::query_as!(
-            Invitation,
+        sqlx::query_as::<_, Invitation>(
             r#"
             SELECT * FROM invitations WHERE id = $1
             "#,
-            invitation_id
         )
+        .bind(invitation_id)
         .fetch_optional(self.pool())
         .await
     }
@@ -143,15 +140,14 @@ impl InvitationRepository for Db {
         &self,
         user_id: Uuid,
     ) -> Result<Vec<Invitation>, sqlx::Error> {
-        sqlx::query_as!(
-            Invitation,
+        sqlx::query_as::<_, Invitation>(
             r#"
             SELECT * FROM invitations
             WHERE invitee_id = $1 AND status = $2
             "#,
-            user_id,
-            InvitationStatus::Pending.to_string()
         )
+        .bind(user_id)
+        .bind(InvitationStatus::Pending.to_string())
         .fetch_all(self.pool())
         .await
     }
@@ -166,33 +162,33 @@ impl InvitationRepository for Db {
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.pool().begin().await?;
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE invitations
             SET status = $3
             WHERE room_id = $1 AND invitee_id = $2 AND status = 'pending'
             "#,
-            room_id,
-            user_id,
-            InvitationStatus::Accepted.to_string()
         )
+        .bind(room_id)
+        .bind(user_id)
+        .bind(InvitationStatus::Accepted.to_string())
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO room_members (room_id, room_name, user_id, username, joined_at, last_read_at, unread_count)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (room_id, user_id) DO NOTHING
             "#,
-            room_id,
-            room_name,
-            user_id,
-            username,
-            joined_at,
-            Utc::now(),
-            0
         )
+        .bind(room_id)
+        .bind(room_name)
+        .bind(user_id)
+        .bind(username)
+        .bind(joined_at)
+        .bind(Utc::now())
+        .bind(0)
         .execute(&mut *tx)
         .await?;
 

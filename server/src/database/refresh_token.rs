@@ -36,15 +36,14 @@ impl RefreshTokenRepository for Db {
         &self,
         token_hash: &str,
     ) -> Result<Option<RefreshToken>, sqlx::Error> {
-        sqlx::query_as!(
-            RefreshToken,
+        sqlx::query_as::<_, RefreshToken>(
             r#"
             SELECT *
             FROM refresh_tokens
             WHERE token_hash = $1
             "#,
-            token_hash,
         )
+        .bind(token_hash)
         .fetch_optional(self.pool())
         .await
     }
@@ -59,8 +58,7 @@ impl RefreshTokenRepository for Db {
         let created_at = Utc::now();
         let expires_at = created_at + expires_in;
 
-        sqlx::query_as!(
-            RefreshToken,
+        sqlx::query_as::<_, RefreshToken>(
             r#"
             INSERT INTO refresh_tokens (
                 id, user_id, token_hash, expires_at, created_at
@@ -68,12 +66,12 @@ impl RefreshTokenRepository for Db {
             VALUES ($1, $2, $3, $4, $5)
             RETURNING *
             "#,
-            Uuid::new_v4(),
-            user_id,
-            token_hash,
-            expires_at,
-            created_at,
         )
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(token_hash)
+        .bind(expires_at)
+        .bind(created_at)
         .fetch_one(self.pool())
         .await
     }
@@ -82,15 +80,14 @@ impl RefreshTokenRepository for Db {
         &self,
         token_hash: &str,
     ) -> Result<Option<RefreshToken>, sqlx::Error> {
-        sqlx::query_as!(
-            RefreshToken,
+        sqlx::query_as::<_, RefreshToken>(
             r#"
             DELETE FROM refresh_tokens
             WHERE token_hash = $1
             RETURNING *
             "#,
-            token_hash,
         )
+        .bind(token_hash)
         .fetch_optional(self.pool())
         .await
     }

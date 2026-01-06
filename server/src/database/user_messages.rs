@@ -52,23 +52,22 @@ impl MessageRepository for Db {
         content: &str,
         message_type: MessageType,
     ) -> Result<UserMessage, sqlx::Error> {
-        sqlx::query_as!(
-            UserMessage,
+        sqlx::query_as::<_, UserMessage>(
             r#"
             INSERT INTO user_messages (id, room_id, room_name, author_id, author_username, content, message_type, status, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
             "#,
-            Uuid::new_v4(),
-            room_id,
-            room_name,
-            author_id,
-            author_username,
-            content,
-            message_type.to_string(),
-            MessageStatus::Sent.to_string(),
-            Utc::now(),
         )
+        .bind(Uuid::new_v4())
+        .bind(room_id)
+        .bind(room_name)
+        .bind(author_id)
+        .bind(author_username)
+        .bind(content)
+        .bind(message_type.to_string())
+        .bind(MessageStatus::Sent.to_string())
+        .bind(Utc::now())
         .fetch_one(self.pool())
         .await
     }
@@ -78,15 +77,14 @@ impl MessageRepository for Db {
         &self,
         message_id: Uuid,
     ) -> Result<Option<UserMessage>, sqlx::Error> {
-        sqlx::query_as!(
-            UserMessage,
+        sqlx::query_as::<_, UserMessage>(
             r#"
             SELECT *
             FROM user_messages
             WHERE id = $1
             "#,
-            message_id
         )
+        .bind(message_id)
         .fetch_optional(self.pool())
         .await
     }
@@ -99,8 +97,7 @@ impl MessageRepository for Db {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<UserMessage>, sqlx::Error> {
-        let mut messages = sqlx::query_as!(
-            UserMessage,
+        let mut messages = sqlx::query_as::<_, UserMessage>(
             r#"
             SELECT
                 m.id, m.room_id, m.room_name, m.author_id, m.author_username, m.content,
@@ -115,11 +112,11 @@ impl MessageRepository for Db {
             ORDER BY m.created_at DESC
             LIMIT $3 OFFSET $4
             "#,
-            room_id,
-            user_id,
-            limit,
-            offset
         )
+        .bind(room_id)
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(self.pool())
         .await?;
 
@@ -133,33 +130,31 @@ impl MessageRepository for Db {
         message_id: Uuid,
         new_content: &str,
     ) -> Result<Option<UserMessage>, sqlx::Error> {
-        sqlx::query_as!(
-            UserMessage,
+        sqlx::query_as::<_, UserMessage>(
             r#"
             UPDATE user_messages
             SET content = $1, status = 'edited'
             WHERE id = $2 AND status != 'deleted'
             RETURNING *
             "#,
-            new_content,
-            message_id
         )
+        .bind(new_content)
+        .bind(message_id)
         .fetch_optional(self.pool())
         .await
     }
 
     #[instrument(skip(self))]
     async fn delete_message(&self, message_id: Uuid) -> Result<Option<UserMessage>, sqlx::Error> {
-        sqlx::query_as!(
-            UserMessage,
+        sqlx::query_as::<_, UserMessage>(
             r#"
             UPDATE user_messages
             SET status = 'deleted', content = ''
             WHERE id = $1
             RETURNING *
             "#,
-            message_id
         )
+        .bind(message_id)
         .fetch_optional(self.pool())
         .await
     }

@@ -77,46 +77,44 @@ impl RoomMemberRepository for Db {
         room_id: Uuid,
         user_id: Uuid,
     ) -> Result<Option<RoomMember>, sqlx::Error> {
-        sqlx::query_as!(
-            RoomMember,
+        sqlx::query_as::<_, RoomMember>(
             r#"
             DELETE FROM room_members
             WHERE room_id = $1 AND user_id = $2
             RETURNING *
             "#,
-            room_id,
-            user_id
         )
+        .bind(room_id)
+        .bind(user_id)
         .fetch_optional(self.pool())
         .await
     }
 
     #[instrument(skip(self))]
     async fn get_members(&self, room_id: Uuid) -> Result<Vec<RoomMember>, sqlx::Error> {
-        sqlx::query_as!(
-            RoomMember,
+        sqlx::query_as::<_, RoomMember>(
             r#"
             SELECT *
             FROM room_members
             WHERE room_id = $1
             "#,
-            room_id
         )
+        .bind(room_id)
         .fetch_all(self.pool())
         .await
     }
 
     #[instrument(skip(self))]
     async fn is_member(&self, room_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"
             SELECT *
             FROM room_members
             WHERE room_id = $1 AND user_id = $2
             "#,
-            room_id,
-            user_id
         )
+        .bind(room_id)
+        .bind(user_id)
         .fetch_optional(self.pool())
         .await?;
 
@@ -125,14 +123,14 @@ impl RoomMemberRepository for Db {
 
     #[instrument(skip(self))]
     async fn is_admin(&self, room_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"
             SELECT * FROM rooms
             WHERE id = $1 AND admin_id = $2
             "#,
-            room_id,
-            user_id
         )
+        .bind(room_id)
+        .bind(user_id)
         .fetch_optional(self.pool())
         .await?;
 
@@ -199,15 +197,15 @@ impl RoomMemberRepository for Db {
         room_id: Uuid,
         user_id: Uuid,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE room_members
             SET unread_count = unread_count + 1
             WHERE room_id = $1 AND user_id = $2
             "#,
-            room_id,
-            user_id,
         )
+        .bind(room_id)
+        .bind(user_id)
         .execute(self.pool())
         .await?;
 
@@ -220,16 +218,16 @@ impl RoomMemberRepository for Db {
         room_id: Uuid,
         user_id: Uuid,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             UPDATE room_members
             SET last_read_at = NOW()
             , unread_count = 0
             WHERE room_id = $1 AND user_id = $2
             "#,
-            room_id,
-            user_id,
         )
+        .bind(room_id)
+        .bind(user_id)
         .execute(self.pool())
         .await?;
 
