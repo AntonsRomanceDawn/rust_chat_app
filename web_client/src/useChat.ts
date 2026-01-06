@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { ClientReq, ServerResp, RoomInfo, MessageInfo, InvitationInfo, UserInfo, MemberInfo } from './types';
 import { SignalManager } from './lib/SignalManager';
 
-const WS_URL = 'ws://localhost:3000/ws_handler'; // Or wss:// if using HTTPS
+// Compute WS URL dynamically: use env if provided, else derive from location with HTTPS/WSS
+const WS_PATH = '/ws_handler';
+const WS_URL = import.meta.env.VITE_WS_URL ?? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${WS_PATH}`;
 
 export interface RoomDetails {
     room_id: string;

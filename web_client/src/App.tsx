@@ -8,7 +8,8 @@ import { ChatArea } from './components/ChatArea';
 import { RoomInfoModal } from './components/RoomInfoModal';
 import { Notification } from './components/Notification';
 
-const API_URL = 'http://localhost:3000';
+// API base: env override, else relative /api so proxies (Vite dev or Nginx) can forward to backend
+const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 
 function parseJwt(token: string) {
     try {

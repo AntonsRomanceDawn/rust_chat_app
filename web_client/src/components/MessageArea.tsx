@@ -1,5 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 
+const API_URL = import.meta.env.VITE_API_URL ?? '/api';
+
 interface Message {
     message_id: string;
     author_username: string;
@@ -53,7 +55,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
         if (!token) return;
         try {
             console.log('Downloading file:', { fileId, messageId, filename });
-            const response = await fetch('http://localhost:3000/files/download', {
+            const response = await fetch(`${API_URL}/files/download`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

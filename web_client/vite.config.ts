@@ -12,12 +12,10 @@ export default defineConfig(({ mode }) => ({
             '/api': {
                 target: 'http://localhost:3000',
                 changeOrigin: true,
-                rewrite: (path) => path.replace(/^\/api/, ''),
             },
-            '/ws': {
+            '/ws_handler': {
                 target: 'ws://localhost:3000',
                 ws: true,
-                rewrite: (path) => path.replace(/^\/ws/, ''),
             }
         }
     }

@@ -13,7 +13,7 @@ use super::{
 };
 
 pub fn handler(state: AppState) -> Router {
-    Router::new()
+    let api = Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
         .route("/refresh-token", post(refresh_token))
@@ -21,7 +21,10 @@ pub fn handler(state: AppState) -> Router {
         .route("/keys/status/count", get(get_key_count))
         .route("/keys/{username}", get(get_prekey_bundle))
         .route("/files", post(upload_file))
-        .route("/files/download", post(get_file))
+        .route("/files/download", post(get_file));
+
+    Router::new()
+        .nest("/api", api)
         .route("/ws_handler", get(ws_handler))
         .with_state(state)
 }
