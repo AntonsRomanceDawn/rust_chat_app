@@ -20,14 +20,13 @@ export function useChat(token: string | null, username: string | null, refreshTo
     const [messages, setMessages] = useState<Record<string, MessageInfo[]>>({});
     const [invitations, setInvitations] = useState<InvitationInfo[]>([]);
     const [searchResults, setSearchResults] = useState<UserInfo[]>([]);
-    const [error, setError] = useState<string | null>(null);
     const [isConnected, setIsConnected] = useState(false);
-    const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
     const [roomDetails, setRoomDetails] = useState<RoomDetails | null>(null);
     const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
     const [signalManager, setSignalManager] = useState<SignalManager | null>(null);
 
     // Ref to access currentRoom inside the websocket callback without dependency issues
+    const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const currentRoomRef = useRef<string | null>(null);
     useEffect(() => {
         currentRoomRef.current = currentRoom;
@@ -65,14 +64,12 @@ export function useChat(token: string | null, username: string | null, refreshTo
             setSearchResults([]);
             setIsConnected(false);
             setSocket(null);
-            setUnreadCounts({});
             setRoomDetails(null);
             return;
         }
 
         let ws: WebSocket | null = null;
         let isUnmounted = false;
-        let reconnectTimeout: number | null = null;
 
         const connect = () => {
             if (isUnmounted) return;
@@ -85,7 +82,6 @@ export function useChat(token: string | null, username: string | null, refreshTo
                 }
                 console.log('Connected to WebSocket');
                 setIsConnected(true);
-                setError(null);
                 // Initial data fetch
                 ws?.send(JSON.stringify({ type: 'get_rooms_info' }));
                 ws?.send(JSON.stringify({ type: 'get_pending_invitations' }));
@@ -112,7 +108,7 @@ export function useChat(token: string | null, username: string | null, refreshTo
 
                 if (!isUnmounted) {
                     console.log('Attempting to reconnect...');
-                    reconnectTimeout = setTimeout(async () => {
+                    reconnectTimeoutRef.current = setTimeout(async () => {
                         const newToken = await refreshToken();
                         if (!newToken) {
                             return;
@@ -125,7 +121,7 @@ export function useChat(token: string | null, username: string | null, refreshTo
                 if (isUnmounted) return;
                 console.error('WebSocket error', err);
                 if (ws?.readyState !== WebSocket.OPEN) {
-                    setError('Connection error');
+                    setNotification({ message: 'Connection error', type: 'error' });
                 }
             };
 
@@ -136,7 +132,7 @@ export function useChat(token: string | null, username: string | null, refreshTo
 
         return () => {
             isUnmounted = true;
-            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
             ws?.close();
         };
     }, [token]);
@@ -146,20 +142,15 @@ export function useChat(token: string | null, username: string | null, refreshTo
         switch (data.type) {
             case 'rooms_info':
                 setRooms(data.rooms);
-                const counts: Record<string, number> = {};
-                data.rooms.forEach(r => {
-                    if (r.unread_count > 0) {
-                        counts[r.room_id] = r.unread_count;
-                    }
-                });
-                setUnreadCounts(counts);
+                // Unread counts are now part of the room object, no need to maintain separate state map
                 break;
             case 'room_created':
-                setRooms(prev => [...prev, { room_id: data.room_id, room_name: data.room_name, unread_count: 0 }]);
+                setRooms(prev => [{ room_id: data.room_id, room_name: data.room_name, unread_count: 0 }, ...prev]);
                 break;
             case 'room_joined':
-                setRooms(prev => [...prev, { room_id: data.room_id, room_name: data.room_name, unread_count: 0 }]);
+                setRooms(prev => [{ room_id: data.room_id, room_name: data.room_name, unread_count: 0 }, ...prev]);
                 setInvitations(prev => prev.filter(inv => inv.invitation_id !== data.invitation_id));
+                setCurrentRoom(data.room_id);
                 break;
             case 'room_left':
             case 'room_deleted':
@@ -189,42 +180,115 @@ export function useChat(token: string | null, username: string | null, refreshTo
                 {
                     const decryptedMessages = await Promise.all(data.messages.map(async (msg) => {
                         let content = msg.content;
-                        if (signalManagerRef.current) {
-                            content = await signalManagerRef.current.decryptMessage(msg.author_username, msg.content);
-                        }
-                        return { ...msg, content };
+                        // if (signalManagerRef.current) {
+                        //     content = await signalManagerRef.current.decryptMessage(msg.author_username, msg.content);
+                        // }
+                        return { ...msg, content, message_type: msg.message_type };
                     }));
-                    setMessages(prev => ({
-                        ...prev,
-                        [data.room_id]: decryptedMessages
-                    }));
+
+                    setMessages(prev => {
+                        const existing = prev[data.room_id] || [];
+                        // Prepend new messages, avoiding duplicates based on message_id
+                        const existingIds = new Set(existing.map(m => m.message_id));
+                        const uniqueNew = decryptedMessages.filter(m => !existingIds.has(m.message_id));
+
+                        // Since server returns [Old ... New] (ASC), and we request older info (Offset > 0),
+                        // The fetched block is strictly OLDER than existing.
+                        // So we prepend: [...fetched, ...existing]
+                        // Note: If duplications happen due to race conditions or offset mismatch, filter handles it.
+
+                        return {
+                            ...prev,
+                            [data.room_id]: [...uniqueNew, ...existing]
+                        };
+                    });
                 }
                 break;
             case 'message_received':
             case 'message_sent':
                 {
+                    console.log('MESSAGE_EVENT', data);
                     let content = data.content;
                     const author = data.type === 'message_sent' ? (username || 'Me') : data.author_username;
-                    if (signalManagerRef.current) {
-                        content = await signalManagerRef.current.decryptMessage(author, data.content);
-                    }
+                    // if (signalManagerRef.current && data.type === 'message_received') {
+                    //      content = await signalManagerRef.current.decryptMessage(author, data.content);
+                    // }
+
+                    const newMessage: MessageInfo = {
+                        message_id: data.message_id,
+                        author_username: author, // 'message_sent' doesn't have author_username in payload
+                        content: content,
+                        message_type: data.message_type,
+                        status: data.status,
+                        created_at: data.created_at
+                    };
 
                     setMessages(prev => ({
                         ...prev,
-                        [data.room_id]: [...(prev[data.room_id] || []), {
-                            message_id: data.message_id,
-                            author_username: author,
-                            content: content,
-                            created_at: data.created_at
-                        }]
+                        [data.room_id]: [...(prev[data.room_id] || []), newMessage]
                     }));
-                    if (data.type === 'message_received' && data.room_id !== currentRoomRef.current) {
-                        setUnreadCounts(prev => ({
-                            ...prev,
-                            [data.room_id]: (prev[data.room_id] || 0) + 1
-                        }));
-                    }
+
+                    // Update room list preview and unread count
+                    setRooms(prev => {
+                        const roomIndex = prev.findIndex(r => r.room_id === data.room_id);
+                        if (roomIndex === -1) return prev;
+
+                        const updatedRoom = { ...prev[roomIndex] };
+                        updatedRoom.last_message = newMessage;
+
+                        if (data.type === 'message_received' && data.room_id !== currentRoomRef.current) {
+                            updatedRoom.unread_count += 1;
+                        }
+
+                        // Move updated room to top
+                        const otherRooms = prev.filter(r => r.room_id !== data.room_id);
+                        return [updatedRoom, ...otherRooms];
+                    });
                 }
+                break;
+            case 'message_edited':
+                setMessages(prev => {
+                    const newMessages = { ...prev };
+                    for (const roomId in newMessages) {
+                        const idx = newMessages[roomId].findIndex(m => m.message_id === data.message_id);
+                        if (idx !== -1) {
+                            newMessages[roomId] = newMessages[roomId].map(m =>
+                                m.message_id === data.message_id ? { ...m, content: data.new_content, status: 'edited' } : m
+                            );
+                            // Update last message in room list if needed
+                            setRooms(rooms => rooms.map(r => {
+                                if (r.room_id === roomId && r.last_message?.message_id === data.message_id) {
+                                    return { ...r, last_message: { ...r.last_message, content: data.new_content, status: 'edited' } };
+                                }
+                                return r;
+                            }));
+                            break;
+                        }
+                    }
+                    return newMessages;
+                });
+                break;
+            case 'message_deleted':
+                setMessages(prev => {
+                    const newMessages = { ...prev };
+                    for (const roomId in newMessages) {
+                        const idx = newMessages[roomId].findIndex(m => m.message_id === data.message_id);
+                        if (idx !== -1) {
+                            newMessages[roomId] = newMessages[roomId].map(m =>
+                                m.message_id === data.message_id ? { ...m, content: '', status: 'deleted' } : m
+                            );
+                            // Update last message in room list if needed
+                            setRooms(rooms => rooms.map(r => {
+                                if (r.room_id === roomId && r.last_message?.message_id === data.message_id) {
+                                    return { ...r, last_message: { ...r.last_message, content: '', status: 'deleted' } };
+                                }
+                                return r;
+                            }));
+                            break;
+                        }
+                    }
+                    return newMessages;
+                });
                 break;
             case 'room_info':
                 setRoomDetails({
@@ -260,7 +324,7 @@ export function useChat(token: string | null, username: string | null, refreshTo
                 }
                 break;
             case 'error':
-                setError(data.errors.map(e => e.code).join(', '));
+                setNotification({ message: data.errors.map(e => e.code).join(', '), type: 'error' });
                 break;
         }
     };
@@ -275,7 +339,7 @@ export function useChat(token: string | null, username: string | null, refreshTo
                     socket.send(JSON.stringify(newReq));
                 } catch (e) {
                     console.error("Encryption failed", e);
-                    setError("Failed to encrypt message");
+                    setNotification({ message: "Failed to encrypt message", type: 'error' });
                 }
             } else {
                 socket.send(JSON.stringify(req));
@@ -286,10 +350,21 @@ export function useChat(token: string | null, username: string | null, refreshTo
     };
 
     const clearUnread = (roomId: string) => {
-        setUnreadCounts(prev => {
-            const newCounts = { ...prev };
-            delete newCounts[roomId];
-            return newCounts;
+        setRooms(prev => prev.map(r =>
+            r.room_id === roomId ? { ...r, unread_count: 0 } : r
+        ));
+    };
+
+    const loadMoreMessages = (roomId: string) => {
+        const currentMsgs = messages[roomId] || [];
+        // Only fetch if we have some messages (initial load logic handles 0)
+        // or we rely on consumer to know.
+        // Assuming limit=50.
+        send({
+            type: 'get_messages',
+            room_id: roomId,
+            limit: 50,
+            offset: currentMsgs.length
         });
     };
 
@@ -300,14 +375,14 @@ export function useChat(token: string | null, username: string | null, refreshTo
         messages,
         invitations,
         searchResults,
-        error,
+        setSearchResults,
         isConnected,
         send,
-        unreadCounts,
         clearUnread,
         roomDetails,
         setRoomDetails,
         notification,
-        setNotification
+        setNotification,
+        loadMoreMessages
     };
 }

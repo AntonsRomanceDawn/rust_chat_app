@@ -1,3 +1,54 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.room-item:hover {
+    background-color: #f3f4f6 !important;
+}
+
+.room-item.active:hover {
+    background-color: #dbeafe !important;
+}
+
+/* Override chat-ui-kit styles for purple gradient theme */
+.cs-main-container {
+    background: transparent !important;
+    border: none !important;
+}
+
+.cs-conversation-list,
+.cs-chat-container {
+    background: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(10px) !important;
+    border-radius: 12px !important;
+    margin: 10px !important;
+    box-shadow: 0 8px 32px rgba(102, 126, 234, 0.2) !important;
+}
+
+.cs-conversation-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+    border-radius: 12px 12px 0 0 !important;
+}
+
+.cs-conversation-header * {
+    color: white !important;
+}
+
+.cs-message-input {
+    background: white !important;
+    border-top: 1px solid #e5e7eb !important;
+}
+
+.cs-message-list {
+    background: transparent !important;
+}
+
+.cs-message--incoming .cs-message__content {
+    background: #f3f4f6 !important;
+}
+
+.cs-message--outgoing .cs-message__content {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+}

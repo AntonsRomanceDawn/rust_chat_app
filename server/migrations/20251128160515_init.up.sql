@@ -8,6 +8,15 @@ CREATE TABLE users (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- refresh_tokens
+CREATE TABLE refresh_tokens (
+    id          UUID PRIMARY KEY,
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash  TEXT NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- rooms
 CREATE TABLE rooms (
     id          UUID PRIMARY KEY,
@@ -39,17 +48,19 @@ CREATE TABLE user_messages (
     author_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     author_username TEXT NOT NULL,
     content    TEXT NOT NULL,
-    message_type INT NOT NULL DEFAULT 1,
+    message_type TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'sent',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- refresh_tokens
-CREATE TABLE refresh_tokens (
+-- files
+CREATE TABLE files (
     id          UUID PRIMARY KEY,
-    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash  TEXT NOT NULL,
-    expires_at  TIMESTAMPTZ NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    encrypted_data BYTEA NOT NULL,
+    encrypted_metadata BYTEA,
+    size_in_bytes BIGINT NOT NULL,
+    file_hash TEXT NOT NULL,
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- room_invitations

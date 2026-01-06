@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    database::models::{InvitationStatus, UserRole},
+    database::models::{InvitationStatus, MessageType, UserRole},
     errors::error::ApiErrorItem,
     utils::validation::{validate_confirm_password, validate_password, validate_username},
 };
@@ -77,6 +77,62 @@ pub struct RefreshTokenRespDto {
     pub refresh_token: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UploadFileRespDto {
+    pub file_id: Uuid,
+    pub size_in_bytes: i64,
+    pub uploaded_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetFileReqDto {
+    pub file_id: Uuid,
+    pub message_id: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetFileRespDto {
+    pub file_id: Uuid,
+    pub encrypted_data: Vec<u8>,
+    pub encrypted_metadata: Option<Vec<u8>>,
+    pub size_in_bytes: i64,
+    pub uploaded_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UploadKeysReqDto {
+    pub identity_key: String,
+    pub registration_id: i32,
+    pub signed_prekey: SignedPreKeyDto,
+    pub one_time_prekeys: Vec<OneTimePreKeyDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PreKeyBundleRespDto {
+    pub identity_key: String,
+    pub registration_id: i32,
+    pub signed_prekey: SignedPreKeyDto,
+    pub one_time_prekey: Option<OneTimePreKeyDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KeyCountRespDto {
+    pub count: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignedPreKeyDto {
+    pub key_id: i32,
+    pub public_key: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OneTimePreKeyDto {
+    pub key_id: i32,
+    pub public_key: String,
+}
+
 #[derive(Deserialize, Debug)]
 pub struct WsParams {
     pub token: String,
@@ -117,7 +173,7 @@ pub enum ClientReq {
     SendMessage {
         room_id: Uuid,
         content: String,
-        message_type: Option<i32>,
+        message_type: Option<MessageType>,
     },
     EditMessage {
         message_id: Uuid,
@@ -210,7 +266,7 @@ pub enum ServerResp {
         room_id: Uuid,
         room_name: String,
         content: String,
-        message_type: i32,
+        message_type: MessageType,
         created_at: DateTime<Utc>,
     },
     MessageReceived {
@@ -219,7 +275,7 @@ pub enum ServerResp {
         room_name: String,
         author_username: String,
         content: String,
-        message_type: i32,
+        message_type: MessageType,
         created_at: DateTime<Utc>,
     },
     MessageEdited {
@@ -283,7 +339,7 @@ pub struct MessageInfo {
     pub message_id: Uuid,
     pub author_username: String,
     pub content: String,
-    pub message_type: i32,
+    pub message_type: MessageType,
     pub created_at: DateTime<Utc>,
 }
 
@@ -291,39 +347,6 @@ pub struct MessageInfo {
 pub struct RoomInfo {
     pub room_id: Uuid,
     pub room_name: String,
-    pub unread_count: i64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UploadKeysReqDto {
-    pub identity_key: String,
-    pub registration_id: i32,
-    pub signed_prekey: SignedPreKeyDto,
-    pub one_time_prekeys: Vec<OneTimePreKeyDto>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SignedPreKeyDto {
-    pub key_id: i32,
-    pub public_key: String,
-    pub signature: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct OneTimePreKeyDto {
-    pub key_id: i32,
-    pub public_key: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PreKeyBundleRespDto {
-    pub identity_key: String,
-    pub registration_id: i32,
-    pub signed_prekey: SignedPreKeyDto,
-    pub one_time_prekey: Option<OneTimePreKeyDto>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KeyCountRespDto {
-    pub count: i64,
+    pub last_message: Option<MessageInfo>,
+    pub unread_count: i32,
 }

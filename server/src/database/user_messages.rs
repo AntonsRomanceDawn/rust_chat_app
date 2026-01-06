@@ -3,7 +3,10 @@ use chrono::Utc;
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::database::{db::Db, models::UserMessage};
+use crate::database::{
+    db::Db,
+    models::{MessageStatus, MessageType, UserMessage},
+};
 
 #[async_trait]
 pub trait MessageRepository: Send + Sync {
@@ -14,7 +17,7 @@ pub trait MessageRepository: Send + Sync {
         author_id: Uuid,
         author_username: String,
         content: &str,
-        message_type: i32,
+        message_type: MessageType,
     ) -> Result<UserMessage, sqlx::Error>;
 
     async fn get_message_by_id(&self, message_id: Uuid)
@@ -47,13 +50,13 @@ impl MessageRepository for Db {
         author_id: Uuid,
         author_username: String,
         content: &str,
-        message_type: i32,
+        message_type: MessageType,
     ) -> Result<UserMessage, sqlx::Error> {
         sqlx::query_as!(
             UserMessage,
             r#"
-            INSERT INTO user_messages (id, room_id, room_name, author_id, author_username, content, message_type, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO user_messages (id, room_id, room_name, author_id, author_username, content, message_type, status, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
             "#,
             Uuid::new_v4(),
@@ -62,8 +65,9 @@ impl MessageRepository for Db {
             author_id,
             author_username,
             content,
-            message_type,
-            Utc::now()
+            message_type.to_string(),
+            MessageStatus::Sent.to_string(),
+            Utc::now(),
         )
         .fetch_one(self.pool())
         .await
@@ -77,7 +81,8 @@ impl MessageRepository for Db {
         sqlx::query_as!(
             UserMessage,
             r#"
-            SELECT * FROM user_messages
+            SELECT *
+            FROM user_messages
             WHERE id = $1
             "#,
             message_id
@@ -97,7 +102,12 @@ impl MessageRepository for Db {
         let mut messages = sqlx::query_as!(
             UserMessage,
             r#"
-            SELECT m.* FROM user_messages m
+            SELECT
+                m.id, m.room_id, m.room_name, m.author_id, m.author_username, m.content,
+                m.message_type,
+                m.status,
+                m.created_at
+            FROM user_messages m
             JOIN room_members rm ON m.room_id = rm.room_id
             WHERE m.room_id = $1
             AND rm.user_id = $2
@@ -127,8 +137,8 @@ impl MessageRepository for Db {
             UserMessage,
             r#"
             UPDATE user_messages
-            SET content = $1
-            WHERE id = $2
+            SET content = $1, status = 'edited'
+            WHERE id = $2 AND status != 'deleted'
             RETURNING *
             "#,
             new_content,
@@ -142,7 +152,12 @@ impl MessageRepository for Db {
     async fn delete_message(&self, message_id: Uuid) -> Result<Option<UserMessage>, sqlx::Error> {
         sqlx::query_as!(
             UserMessage,
-            r#"DELETE FROM user_messages WHERE id = $1 RETURNING *"#,
+            r#"
+            UPDATE user_messages
+            SET status = 'deleted', content = ''
+            WHERE id = $1
+            RETURNING *
+            "#,
             message_id
         )
         .fetch_optional(self.pool())

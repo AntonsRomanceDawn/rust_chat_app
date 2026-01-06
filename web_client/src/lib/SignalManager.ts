@@ -128,7 +128,7 @@ export class SignalManager {
         }
     }
 
-    async encryptGroupMessage(roomId: string, content: string, members: string[]): Promise<{ content: string, type: number }> {
+    async encryptGroupMessage(_roomId: string, content: string, members: string[]): Promise<{ content: string, type: number }> {
         const key = await window.crypto.subtle.generateKey(
             { name: "AES-GCM", length: 256 },
             true,

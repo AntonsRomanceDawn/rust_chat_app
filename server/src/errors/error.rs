@@ -80,6 +80,12 @@ pub enum AppError {
     #[error("Not message author")]
     NotMessageAuthor,
 
+    // File
+    #[error("File not found")]
+    FileNotFound,
+    #[error("Exceeding file limit")]
+    ExceedingFileLimit,
+
     // General
     #[error("Invalid request format")]
     InvalidRequestFormat,
@@ -151,6 +157,12 @@ impl AppError {
             }
             AppError::NotMessageAuthor => {
                 vec![ApiErrorItem::new(error_codes::NOT_MESSAGE_AUTHOR, None)]
+            }
+            AppError::FileNotFound => {
+                vec![ApiErrorItem::new(error_codes::FILE_NOT_FOUND, None)]
+            }
+            AppError::ExceedingFileLimit => {
+                vec![ApiErrorItem::new(error_codes::FILE_LIMIT_EXCEEDED, None)]
             }
         }
     }
@@ -253,6 +265,14 @@ impl IntoResponse for AppError {
             AppError::NotMessageAuthor => {
                 tracing::warn!("Not message author");
                 (StatusCode::FORBIDDEN, self.to_api_errors())
+            }
+            AppError::FileNotFound => {
+                tracing::debug!("File not found");
+                (StatusCode::NOT_FOUND, self.to_api_errors())
+            }
+            AppError::ExceedingFileLimit => {
+                tracing::debug!("Exceeding file limit");
+                (StatusCode::BAD_REQUEST, self.to_api_errors())
             }
         };
 

@@ -8,7 +8,7 @@ use crate::{
         invitations::InvitationRepository, room_members::RoomMemberRepository,
         rooms::RoomRepository, users::UserRepository,
     },
-    dtos::{MemberInfo, RoomInfo, ServerResp},
+    dtos::{MemberInfo, MessageInfo, RoomInfo, ServerResp},
     errors::error::AppError,
 };
 
@@ -407,10 +407,21 @@ pub async fn get_rooms_info_response(state: &&AppState, user_id: Uuid) {
             info!("Sending rooms info to user {}", user_id);
             let rooms_info = rooms
                 .into_iter()
-                .map(|member| RoomInfo {
-                    room_id: member.room_id,
-                    room_name: member.room_name,
-                    unread_count: member.unread_count,
+                .map(|(member, last_message)| {
+                    let last_message = last_message.map(|msg| MessageInfo {
+                        message_id: msg.id,
+                        author_username: msg.author_username,
+                        content: msg.content,
+                        message_type: msg.message_type,
+                        created_at: msg.created_at,
+                    });
+
+                    RoomInfo {
+                        room_id: member.room_id,
+                        room_name: member.room_name,
+                        last_message,
+                        unread_count: member.unread_count,
+                    }
                 })
                 .collect::<Vec<RoomInfo>>();
             let _ = send_event(state, user_id, ServerResp::RoomsInfo { rooms: rooms_info });

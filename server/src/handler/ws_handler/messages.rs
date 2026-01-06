@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::{
     config::AppState,
     database::{
-        room_members::RoomMemberRepository, rooms::RoomRepository,
+        models::MessageType, room_members::RoomMemberRepository, rooms::RoomRepository,
         user_messages::MessageRepository, users::UserRepository,
     },
     dtos::{MessageInfo, ServerResp},
@@ -19,10 +19,10 @@ pub async fn send_message_response(
     user_id: Uuid,
     room_id: Uuid,
     content: String,
-    message_type: Option<i32>,
+    message_type: Option<MessageType>,
 ) {
     info!("User {} is sending message to room {}", user_id, room_id);
-    let message_type = message_type.unwrap_or(1); // Default to 1 (Ciphertext) if not provided
+    let message_type = message_type.unwrap_or(MessageType::Text);
     let room_name = match state.db.get_room_by_id(room_id).await {
         Ok(Some(room)) => room.name,
         Ok(None) => {

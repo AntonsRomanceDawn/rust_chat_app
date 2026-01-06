@@ -7,6 +7,7 @@ use crate::config::AppState;
 
 use super::{
     auth_handler::{login, refresh_token, register},
+    file_handler::{get_file, upload_file},
     keys_handler::{get_key_count, get_prekey_bundle, upload_keys},
     ws_handler::ws_router::ws_handler,
 };
@@ -19,6 +20,8 @@ pub fn handler(state: AppState) -> Router {
         .route("/keys", post(upload_keys))
         .route("/keys/status/count", get(get_key_count))
         .route("/keys/{username}", get(get_prekey_bundle))
+        .route("/files", post(upload_file))
+        .route("/files/download", post(get_file))
         .route("/ws_handler", get(ws_handler))
         .with_state(state)
 }

@@ -12,6 +12,9 @@ pub const PASSWORD_CONFLICT: &str = "password_conflict";
 pub const SESSION_EXPIRED: &str = "session_expired";
 pub const INVALID_TOKEN: &str = "invalid_token";
 pub const INTERNAL_SERVER_ERROR: &str = "internal_server_error";
+pub const INVALID_REQUEST_FORMAT: &str = "invalid_request_format";
+pub const FILE_LIMIT_EXCEEDED: &str = "file_limit_exceeded";
+pub const FILE_NOT_FOUND: &str = "file_not_found";
 
 // WebSocket specific errors
 pub const ROOM_NOT_FOUND: &str = "room_not_found";
@@ -26,5 +29,4 @@ pub const NO_PENDING_INVITATION: &str = "no_pending_invitation";
 pub const ALREADY_INVITED: &str = "already_invited";
 pub const MESSAGE_NOT_FOUND: &str = "message_not_found";
 pub const NOT_MESSAGE_AUTHOR: &str = "not_message_author";
-pub const INVALID_REQUEST_FORMAT: &str = "invalid_request_format";
 pub const USER_HAS_NO_KEYS: &str = "user_has_no_keys";

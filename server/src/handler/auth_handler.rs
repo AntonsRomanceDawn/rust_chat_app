@@ -4,18 +4,14 @@ use tracing::{info, instrument};
 
 use crate::{
     config::AppState,
-    database::{
-        models::UserRole,
-        refresh_token::RefreshTokenRepository,
-        users::UserRepository,
-    },
+    database::{models::UserRole, refresh_token::RefreshTokenRepository, users::UserRepository},
     dtos::{
         LoginReqDto, LoginRespDto, RefreshTokenReqDto, RefreshTokenRespDto, RegisterReqDto,
         RegisterRespDto,
     },
     errors::error::AppError,
     utils::{
-        hash::{hash_password, hash_refresh_token, verify_hashed_password},
+        hash::{hash_data, hash_password, verify_hashed_password},
         token::{generate_access_token, generate_refresh_token},
     },
 };
@@ -71,7 +67,7 @@ pub async fn login(
         state.config.access_expiry,
     )?;
     let refresh_token = generate_refresh_token()?;
-    let refresh_token_hash = hash_refresh_token(&refresh_token);
+    let refresh_token_hash = hash_data(&refresh_token.as_bytes());
 
     let _ = state
         .db
@@ -95,7 +91,7 @@ pub async fn refresh_token(
     Json(body): Json<RefreshTokenReqDto>,
 ) -> Result<Json<RefreshTokenRespDto>, AppError> {
     info!("Refreshing token");
-    let refresh_token_hash = hash_refresh_token(&body.refresh_token);
+    let refresh_token_hash = hash_data(&body.refresh_token.as_bytes());
     let refresh_token = match state
         .db
         .get_refresh_token_by_hash(&refresh_token_hash)
@@ -122,7 +118,7 @@ pub async fn refresh_token(
         state.config.access_expiry,
     )?;
     let refresh_token = generate_refresh_token()?;
-    let refresh_token_hash = hash_refresh_token(&refresh_token);
+    let refresh_token_hash = hash_data(&refresh_token.as_bytes());
 
     let _ = state
         .db

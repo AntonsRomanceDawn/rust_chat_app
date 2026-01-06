@@ -37,9 +37,9 @@ pub fn verify_hashed_password(password: &str, password_hash: &str) -> Result<boo
     Ok(is_valid)
 }
 
-#[instrument(skip(token))]
-pub fn hash_refresh_token(token: &str) -> String {
+#[instrument(skip(data))]
+pub fn hash_data(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
+    hasher.update(data);
     format!("{:x}", hasher.finalize())
 }

@@ -17,10 +17,13 @@ export interface RegisterResp {
     created_at: string;
 }
 
-export interface RoomInfo {
-    room_id: string;
-    room_name: string;
-    unread_count: number;
+export interface MessageInfo {
+    message_id: string;
+    author_username: string;
+    content: string;
+    message_type: 'text' | 'file' | 'system';
+    status: 'sent' | 'edited' | 'deleted';
+    created_at: string;
 }
 
 export interface MemberInfo {
@@ -28,11 +31,11 @@ export interface MemberInfo {
     joined_at: string;
 }
 
-export interface MessageInfo {
-    message_id: string;
-    author_username: string;
-    content: string;
-    created_at: string;
+export interface RoomInfo {
+    room_id: string;
+    room_name: string;
+    last_message?: MessageInfo;
+    unread_count: number;
 }
 
 export interface InvitationInfo {
@@ -82,8 +85,8 @@ export type ServerResp =
     | { type: 'invitation_declined'; invitation_id: string }
     | { type: 'invitee_declined'; invitation_id: string; room_id: string; room_name: string; invitee_username: string }
     | { type: 'pending_invitations'; pending_invitations: InvitationInfo[] }
-    | { type: 'message_sent'; message_id: string; room_id: string; room_name: string; content: string; created_at: string }
-    | { type: 'message_received'; message_id: string; room_id: string; room_name: string; author_username: string; content: string; created_at: string }
+    | { type: 'message_sent'; message_id: string; room_id: string; room_name: string; content: string; created_at: string; message_type: 'text' | 'file' | 'system'; status: 'sent' | 'edited' | 'deleted' }
+    | { type: 'message_received'; message_id: string; room_id: string; room_name: string; author_username: string; content: string; created_at: string; message_type: 'text' | 'file' | 'system'; status: 'sent' | 'edited' | 'deleted' }
     | { type: 'message_edited'; message_id: string; new_content: string }
     | { type: 'message_deleted'; message_id: string }
     | { type: 'message_history'; room_id: string; room_name: string; messages: MessageInfo[] }
