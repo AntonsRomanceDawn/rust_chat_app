@@ -57,15 +57,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
+            height: '100%', // Match parent height
         }}>
             {/* Header with Connection and Logout */}
             <div style={{
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                padding: '12px',
+                padding: '0 20px',
+                height: '70px', // Fixed height to match ChatHeader
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 color: 'white',
+                flexShrink: 0,
             }}>
                 <span style={{
                     fontSize: '12px',
@@ -224,7 +227,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     onMouseLeave={(e) => e.currentTarget.style.background = currentRoom === room.room_id ? '#ede9fe' : 'transparent'}
                                 >
                                     <div style={{ fontWeight: 600, fontSize: '14px', color: '#1f2937', marginBottom: '4px' }}>
-                                        #{room.room_name}
+                                        {room.room_name}
                                     </div>
                                     <div style={{
                                         display: 'flex',
@@ -234,13 +237,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         <div style={{ fontSize: '12px', color: '#6b7280', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '200px' }}>
                                             {room.last_message ? (
                                                 <span>
-                                                    <span style={{ fontWeight: 500 }}>{room.last_message.author_username}: </span>
+                                                    {room.last_message.message_type === 'system' ? null : <span style={{ fontWeight: 900 }}>{room.last_message.author_username}: </span>}
                                                     {(() => {
                                                         try {
+                                                            // Check for system message type first if available
+                                                            if (room.last_message.message_type === 'system') {
+                                                                const parsed = JSON.parse(room.last_message.content);
+                                                                switch (parsed.type) {
+                                                                    case 'joined': return `${parsed.username} joined`;
+                                                                    case 'left': return `${parsed.username} left`;
+                                                                    case 'kicked': return `${parsed.username} kicked`;
+                                                                    default: return 'System message';
+                                                                }
+                                                            }
+
                                                             const parsed = JSON.parse(room.last_message.content);
                                                             if (parsed.type === 'file' && parsed.filename) {
                                                                 return `📁 ${parsed.filename}`;
                                                             }
+                                                            // Fallback for sniffed system messages if type isn't set on last_message object
+                                                            if (parsed.type === 'joined' && parsed.username) return `${parsed.username} joined`;
+                                                            if (parsed.type === 'left' && parsed.username) return `${parsed.username} left`;
+                                                            if (parsed.type === 'kicked' && parsed.username) return `${parsed.username} kicked`;
+
                                                         } catch { }
                                                         return room.last_message.content;
                                                     })()}

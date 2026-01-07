@@ -62,10 +62,11 @@ impl RoomRepository for Db {
 
         sqlx::query(
             r#"
-            INSERT INTO room_members (room_id, room_name, user_id, username, joined_at)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO room_members (id, room_id, room_name, user_id, username, joined_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
             "#,
         )
+        .bind(Uuid::new_v4())
         .bind(id)
         .bind(name)
         .bind(creator_id)
@@ -121,16 +122,44 @@ impl RoomRepository for Db {
             return Ok(None);
         }
 
-        let member_ids: Vec<Uuid> =
-            sqlx::query(r#"SELECT user_id FROM room_members WHERE room_id = $1"#)
-                .bind(room_id)
-                .fetch_all(&mut *tx)
-                .await?
-                .into_iter()
-                .map(|m| m.get::<Uuid, _>("user_id"))
-                .collect();
+        // Check if user is currently an active member (not already left/kicked)
+        let is_active_member = sqlx::query(
+            r#"SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL"#,
+        )
+        .bind(room_id)
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some();
+
+        if !is_active_member {
+            // User is not active (already left or kicked).
+            // If they are calling leave_room, it means they want to hide it from their list.
+            sqlx::query(
+                r#"UPDATE room_members SET is_visible = FALSE WHERE room_id = $1 AND user_id = $2"#,
+            )
+            .bind(room_id)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+            return Ok(room);
+        }
+
+        // User IS active. They are leaving now.
+        let member_ids: Vec<Uuid> = sqlx::query(
+            r#"SELECT user_id FROM room_members WHERE room_id = $1 AND left_at IS NULL"#,
+        )
+        .bind(room_id)
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .map(|m| m.get::<Uuid, _>("user_id"))
+        .collect();
 
         if member_ids.len() == 1 {
+            // Last member leaving. Delete room.
             sqlx::query(r#"DELETE FROM rooms WHERE id = $1"#)
                 .bind(room_id)
                 .execute(&mut *tx)
@@ -139,7 +168,9 @@ impl RoomRepository for Db {
             return Ok(room);
         }
 
-        sqlx::query(r#"DELETE FROM room_members WHERE room_id = $1 AND user_id = $2"#)
+        // Standard leave: set left_at and hide it.
+        sqlx::query(r#"UPDATE room_members SET left_at = $1, is_visible = FALSE WHERE room_id = $2 AND user_id = $3 AND left_at IS NULL"#)
+            .bind(Utc::now())
             .bind(room_id)
             .bind(user_id)
             .execute(&mut *tx)

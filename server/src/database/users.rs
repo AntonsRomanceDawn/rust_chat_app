@@ -58,7 +58,7 @@ impl UserRepository for Db {
         .bind(Uuid::new_v4())
         .bind(username)
         .bind(password_hash)
-        .bind(role.to_string())
+        .bind(role)
         .bind(Utc::now())
         .fetch_optional(self.pool())
         .await

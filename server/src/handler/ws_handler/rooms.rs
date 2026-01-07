@@ -8,11 +8,13 @@ use crate::{
         invitations::InvitationRepository, room_members::RoomMemberRepository,
         rooms::RoomRepository, users::UserRepository,
     },
-    dtos::{MemberInfo, MessageInfo, RoomInfo, ServerResp},
+    dtos::{MemberInfo, MessageInfo, RoomInfo, ServerResp, SystemMessageContent},
     errors::error::AppError,
 };
 
-use super::utils::{send_error, send_event};
+use crate::handler::ws_handler::utils::{
+    create_and_broadcast_system_message, send_error, send_event,
+};
 
 #[instrument(skip(state), fields(user_id = %user_id))]
 pub async fn create_room_response(state: &&AppState, user_id: Uuid, name: String) {
@@ -142,6 +144,16 @@ pub async fn join_room_response(state: &&AppState, user_id: Uuid, invitation_id:
             let _ = send_error(state, user_id, AppError::Internal);
         });
 
+    let _ = create_and_broadcast_system_message(
+        state,
+        room_id,
+        room.name.clone(),
+        SystemMessageContent::Joined {
+            username: invitee_username.clone(),
+        },
+    )
+    .await;
+
     let event = ServerResp::MemberJoined {
         room_id,
         room_name: room.name.clone(),
@@ -200,9 +212,23 @@ pub async fn leave_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid
         _ => {}
     };
 
+    let username = match state.db.get_user_by_id(user_id).await {
+        Ok(Some(u)) => u.username,
+        _ => "Unknown".to_string(),
+    };
+
     let _ = match state.db.leave_room(room_id, user_id).await {
         Ok(Some(room)) => {
             info!("User {} left room {}", user_id, room_id);
+
+            let _ = create_and_broadcast_system_message(
+                state,
+                room_id,
+                room.name.clone(),
+                SystemMessageContent::Left { username },
+            )
+            .await;
+
             let _ = send_event(
                 state,
                 user_id,
@@ -413,6 +439,7 @@ pub async fn get_rooms_info_response(state: &&AppState, user_id: Uuid) {
                         author_username: msg.author_username,
                         content: msg.content,
                         message_type: msg.message_type,
+                        message_status: msg.status,
                         created_at: msg.created_at,
                     });
 

@@ -147,6 +147,29 @@ export const RoomInfoModal: React.FC<RoomInfoModalProps> = ({
                             ))}
                         </ul>
                     </div>
+
+                    <button
+                        onClick={() => {
+                            if (window.confirm("Are you sure you want to leave this room?")) {
+                                send({ type: 'leave_room', room_id: roomDetails.room_id });
+                                setShowRoomInfo(false);
+                                setRoomDetails(null);
+                            }
+                        }}
+                        style={{
+                            width: '100%',
+                            padding: '10px',
+                            background: '#fee2e2',
+                            color: '#991b1b',
+                            border: '1px solid #fecaca',
+                            borderRadius: '6px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            marginTop: '8px'
+                        }}
+                    >
+                        Leave Room
+                    </button>
                 </div>
             </div>
         </div>

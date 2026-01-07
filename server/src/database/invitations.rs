@@ -79,7 +79,7 @@ impl InvitationRepository for Db {
         .bind(invitee_username)
         .bind(inviter_id)
         .bind(inviter_username)
-        .bind(InvitationStatus::Pending.to_string())
+        .bind(InvitationStatus::Pending)
         .bind(Utc::now())
         .fetch_optional(self.pool())
         .await
@@ -99,7 +99,7 @@ impl InvitationRepository for Db {
             RETURNING *
             "#,
         )
-        .bind(status.to_string())
+        .bind(status)
         .bind(invitation_id)
         .fetch_optional(self.pool())
         .await
@@ -147,7 +147,7 @@ impl InvitationRepository for Db {
             "#,
         )
         .bind(user_id)
-        .bind(InvitationStatus::Pending.to_string())
+        .bind(InvitationStatus::Pending)
         .fetch_all(self.pool())
         .await
     }
@@ -171,17 +171,31 @@ impl InvitationRepository for Db {
         )
         .bind(room_id)
         .bind(user_id)
-        .bind(InvitationStatus::Accepted.to_string())
+        .bind(InvitationStatus::Accepted)
         .execute(&mut *tx)
         .await?;
 
+        // Ensure not already active
+        let is_active = sqlx::query(
+            r#"SELECT * FROM room_members WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL"#,
+        )
+        .bind(room_id)
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if is_active.is_some() {
+            tx.commit().await?;
+            return Ok(());
+        }
+
         sqlx::query(
             r#"
-            INSERT INTO room_members (room_id, room_name, user_id, username, joined_at, last_read_at, unread_count)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (room_id, user_id) DO NOTHING
+            INSERT INTO room_members (id, room_id, room_name, user_id, username, joined_at, last_read_at, unread_count)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             "#,
         )
+        .bind(Uuid::new_v4())
         .bind(room_id)
         .bind(room_name)
         .bind(user_id)

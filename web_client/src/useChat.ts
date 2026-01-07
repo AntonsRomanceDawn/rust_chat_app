@@ -188,16 +188,31 @@ export function useChat(token: string | null, username: string | null, refreshTo
                         return { ...msg, content, message_type: msg.message_type };
                     }));
 
+                    if (decryptedMessages.length > 0) {
+                        // Update last message in room list if this looks like the latest batch
+                        // We don't distinctly know if offset=0 here easily without passing it back,
+                        // but typically history response arrives on room join.
+                        // We can check if we have this room in rooms list and if it has no last_message or if this message is newer.
+                        // But decryptedMessages is sorted ASC or DESC?
+                        // Server says: "messages.reverse(); Ok(messages)" after fetching with DESC sort. So they are ASC (oldest first).
+                        const lastMsg = decryptedMessages[decryptedMessages.length - 1]; // Newest in this batch
+
+                        setRooms(prev => prev.map(r => {
+                            if (r.room_id === data.room_id) {
+                                // Update if current last_message is older or missing
+                                if (!r.last_message || new Date(r.last_message.created_at) < new Date(lastMsg.created_at)) {
+                                    return { ...r, last_message: lastMsg };
+                                }
+                            }
+                            return r;
+                        }));
+                    }
+
                     setMessages(prev => {
                         const existing = prev[data.room_id] || [];
                         // Prepend new messages, avoiding duplicates based on message_id
                         const existingIds = new Set(existing.map(m => m.message_id));
                         const uniqueNew = decryptedMessages.filter(m => !existingIds.has(m.message_id));
-
-                        // Since server returns [Old ... New] (ASC), and we request older info (Offset > 0),
-                        // The fetched block is strictly OLDER than existing.
-                        // So we prepend: [...fetched, ...existing]
-                        // Note: If duplications happen due to race conditions or offset mismatch, filter handles it.
 
                         return {
                             ...prev,
@@ -221,7 +236,7 @@ export function useChat(token: string | null, username: string | null, refreshTo
                         author_username: author, // 'message_sent' doesn't have author_username in payload
                         content: content,
                         message_type: data.message_type,
-                        status: data.status,
+                        message_status: data.message_status,
                         created_at: data.created_at
                     };
 
@@ -255,12 +270,12 @@ export function useChat(token: string | null, username: string | null, refreshTo
                         const idx = newMessages[roomId].findIndex(m => m.message_id === data.message_id);
                         if (idx !== -1) {
                             newMessages[roomId] = newMessages[roomId].map(m =>
-                                m.message_id === data.message_id ? { ...m, content: data.new_content, status: 'edited' } : m
+                                m.message_id === data.message_id ? { ...m, content: data.new_content, message_status: 'edited' } : m
                             );
                             // Update last message in room list if needed
                             setRooms(rooms => rooms.map(r => {
                                 if (r.room_id === roomId && r.last_message?.message_id === data.message_id) {
-                                    return { ...r, last_message: { ...r.last_message, content: data.new_content, status: 'edited' } };
+                                    return { ...r, last_message: { ...r.last_message, content: data.new_content, message_status: 'edited' } };
                                 }
                                 return r;
                             }));
@@ -277,12 +292,12 @@ export function useChat(token: string | null, username: string | null, refreshTo
                         const idx = newMessages[roomId].findIndex(m => m.message_id === data.message_id);
                         if (idx !== -1) {
                             newMessages[roomId] = newMessages[roomId].map(m =>
-                                m.message_id === data.message_id ? { ...m, content: '', status: 'deleted' } : m
+                                m.message_id === data.message_id ? { ...m, content: '', message_status: 'deleted' } : m
                             );
                             // Update last message in room list if needed
                             setRooms(rooms => rooms.map(r => {
                                 if (r.room_id === roomId && r.last_message?.message_id === data.message_id) {
-                                    return { ...r, last_message: { ...r.last_message, content: '', status: 'deleted' } };
+                                    return { ...r, last_message: { ...r.last_message, content: '', message_status: 'deleted' } };
                                 }
                                 return r;
                             }));
@@ -308,20 +323,24 @@ export function useChat(token: string | null, username: string | null, refreshTo
             case 'member_kicked':
                 if (data.username === username) {
                     // I was kicked
-                    setRooms(prev => prev.filter(r => r.room_id !== data.room_id));
                     if (currentRoomRef.current === data.room_id) {
-                        setCurrentRoom(null);
-                        setRoomDetails(null);
+                        // Optional: Maybe don't close the room immediately if they want to see "You were kicked"?
+                        // But requirements say "loses sight as the server deletes them", so they WANT to keep seeing it.
+                        // We will NOT remove from rooms list.
+                        // We will only show notification.
                     }
                     setNotification({ message: `You were kicked from ${data.room_name}`, type: 'error' });
                 } else {
                     // Someone else was kicked
-                    if (roomDetails && roomDetails.room_id === data.room_id) {
-                        setRoomDetails(prev => prev ? {
-                            ...prev,
-                            members: prev.members.filter(m => m.username !== data.username)
-                        } : null);
-                    }
+                    setRoomDetails(prev => {
+                        if (prev && prev.room_id === data.room_id) {
+                            return {
+                                ...prev,
+                                members: prev.members.filter(m => m.username !== data.username)
+                            };
+                        }
+                        return prev;
+                    });
                     setNotification({ message: `${data.username} was kicked from ${data.room_name}`, type: 'success' });
                 }
                 break;

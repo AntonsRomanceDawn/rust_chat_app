@@ -336,6 +336,7 @@ function App() {
                 gap: '20px',
                 maxWidth: '1400px',
                 margin: '0 auto',
+                alignItems: 'stretch', // Ensure both children stretch to full height
             }}>
                 {/* Sidebar */}
                 <Sidebar
@@ -390,6 +391,7 @@ function App() {
                         justifyContent: 'center',
                         color: '#999',
                         fontSize: '18px',
+                        height: '100%', // Match sibling height
                     }}>
                         Select a room to start chatting
                     </div>

@@ -7,7 +7,7 @@ interface Message {
     message_id: string;
     author_username: string;
     content: string;
-    status: string;
+    message_status: string;
     created_at: string;
 }
 
@@ -72,6 +72,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
+            height: '100%', // Ensure it takes full height available in parent flex
         }}>
             <ChatHeader
                 roomName={roomName}

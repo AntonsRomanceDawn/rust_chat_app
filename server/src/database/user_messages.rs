@@ -14,8 +14,8 @@ pub trait MessageRepository: Send + Sync {
         &self,
         room_id: Uuid,
         room_name: String,
-        author_id: Uuid,
-        author_username: String,
+        author_id: Option<Uuid>,
+        author_username: Option<String>,
         content: &str,
         message_type: MessageType,
     ) -> Result<UserMessage, sqlx::Error>;
@@ -47,8 +47,8 @@ impl MessageRepository for Db {
         &self,
         room_id: Uuid,
         room_name: String,
-        author_id: Uuid,
-        author_username: String,
+        author_id: Option<Uuid>,
+        author_username: Option<String>,
         content: &str,
         message_type: MessageType,
     ) -> Result<UserMessage, sqlx::Error> {
@@ -65,8 +65,8 @@ impl MessageRepository for Db {
         .bind(author_id)
         .bind(author_username)
         .bind(content)
-        .bind(message_type.to_string())
-        .bind(MessageStatus::Sent.to_string())
+        .bind(message_type)
+        .bind(MessageStatus::Sent)
         .bind(Utc::now())
         .fetch_one(self.pool())
         .await
@@ -108,6 +108,7 @@ impl MessageRepository for Db {
             JOIN room_members rm ON m.room_id = rm.room_id
             WHERE m.room_id = $1
             AND rm.user_id = $2
+            AND (rm.left_at IS NULL OR m.created_at <= rm.left_at)
             AND m.created_at >= rm.joined_at
             ORDER BY m.created_at DESC
             LIMIT $3 OFFSET $4

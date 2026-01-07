@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::Utc;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -79,11 +80,13 @@ impl RoomMemberRepository for Db {
     ) -> Result<Option<RoomMember>, sqlx::Error> {
         sqlx::query_as::<_, RoomMember>(
             r#"
-            DELETE FROM room_members
-            WHERE room_id = $1 AND user_id = $2
+            UPDATE room_members
+            SET left_at = $1
+            WHERE room_id = $2 AND user_id = $3 AND left_at IS NULL
             RETURNING *
             "#,
         )
+        .bind(Utc::now())
         .bind(room_id)
         .bind(user_id)
         .fetch_optional(self.pool())
@@ -96,7 +99,7 @@ impl RoomMemberRepository for Db {
             r#"
             SELECT *
             FROM room_members
-            WHERE room_id = $1
+            WHERE room_id = $1 AND left_at IS NULL
             "#,
         )
         .bind(room_id)
@@ -110,7 +113,7 @@ impl RoomMemberRepository for Db {
             r#"
             SELECT *
             FROM room_members
-            WHERE room_id = $1 AND user_id = $2
+            WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL
             "#,
         )
         .bind(room_id)
@@ -144,42 +147,52 @@ impl RoomMemberRepository for Db {
     ) -> Result<Vec<(RoomMember, Option<UserMessage>)>, sqlx::Error> {
         sqlx::query(
             r#"
-            SELECT
-                rm.room_id, rm.room_name, rm.user_id, rm.username, rm.joined_at, rm.last_read_at, rm.unread_count,
-                 msg.id, msg.room_id as msg_room_id, msg.room_name as msg_room_name,
-                 msg.author_id, msg.author_username, msg.content, msg.message_type,
-                 msg.status as msg_status,
-                 msg.created_at
-            FROM room_members rm
-            LEFT JOIN LATERAL (
-                SELECT * FROM user_messages msg
-                WHERE msg.room_id = rm.room_id
-                ORDER BY created_at DESC
-                LIMIT 1
-            ) msg ON true
-            WHERE rm.user_id = $1
-            ORDER BY COALESCE(msg.created_at, rm.joined_at) DESC
+            SELECT * FROM (
+                SELECT DISTINCT ON (rm.room_id)
+                    rm.id, rm.room_id, rm.room_name, rm.user_id, rm.username, rm.joined_at, rm.left_at, rm.last_read_at, rm.unread_count, rm.is_visible,
+                    msg.id as message_id,
+                    msg.room_id as msg_room_id,
+                    msg.room_name as msg_room_name,
+                    msg.author_id as msg_author_id,
+                    msg.author_username as msg_author_username,
+                    msg.content as msg_content,
+                    msg.message_type as msg_message_type,
+                    msg.status as msg_status,
+                    msg.created_at as msg_created_at
+                FROM room_members rm
+                LEFT JOIN LATERAL (
+                    SELECT * FROM user_messages msg
+                    WHERE msg.room_id = rm.room_id
+                    AND (rm.left_at IS NULL OR msg.created_at <= rm.left_at)
+                    AND msg.created_at >= rm.joined_at
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) msg ON true
+                WHERE rm.user_id = $1 AND rm.is_visible = true
+                ORDER BY rm.room_id, rm.left_at DESC NULLS FIRST
+            ) sub
+            ORDER BY COALESCE(sub.msg_created_at, sub.joined_at) DESC
             "#,
         )
         .bind(user_id)
         .try_map(|row| {
             let member = RoomMember::from_row(&row)?;
-            let msg_id = row.try_get::<Option<Uuid>, _>("id").ok().flatten();
+            let msg_id = row.try_get::<Option<Uuid>, _>("message_id").ok().flatten();
 
             let last_message = match msg_id {
                 Some(_) => {
                     // Manually construct UserMessage to handle potential ambiguous columns
                     // or nulls from the LEFT JOIN being picked up by from_row
                     Some(UserMessage {
-                        id: row.try_get("id")?,
+                        id: row.try_get("message_id")?,
                         room_id: row.try_get("msg_room_id")?,
                         room_name: row.try_get("msg_room_name")?,
-                        author_id: row.try_get("author_id")?,
-                        author_username: row.try_get("author_username")?,
-                        content: row.try_get("content")?,
-                        message_type: row.try_get("message_type")?,
+                        author_id: row.try_get("msg_author_id")?,
+                        author_username: row.try_get("msg_author_username")?,
+                        content: row.try_get("msg_content")?,
+                        message_type: row.try_get("msg_message_type")?,
                         status: row.try_get("msg_status")?,
-                        created_at: row.try_get("created_at")?,
+                        created_at: row.try_get("msg_created_at")?,
                     })
                 }
                 None => None,
@@ -221,11 +234,12 @@ impl RoomMemberRepository for Db {
         sqlx::query(
             r#"
             UPDATE room_members
-            SET last_read_at = NOW()
+            SET last_read_at = $1
             , unread_count = 0
-            WHERE room_id = $1 AND user_id = $2
+            WHERE room_id = $2 AND user_id = $3
             "#,
         )
+        .bind(Utc::now())
         .bind(room_id)
         .bind(user_id)
         .execute(self.pool())

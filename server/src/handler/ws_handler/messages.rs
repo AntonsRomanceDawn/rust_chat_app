@@ -1,4 +1,4 @@
-use tracing::{error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -68,8 +68,8 @@ pub async fn send_message_response(
         .insert_message(
             room_id,
             room_name,
-            author.id,
-            author.username,
+            Some(author.id),
+            Some(author.username),
             &content,
             message_type,
         )
@@ -172,7 +172,7 @@ pub async fn edit_message_response(
         }
     };
 
-    if message.author_id != user_id {
+    if message.author_id != Some(user_id) {
         warn!(
             "User {} is not the author of message {}",
             user_id, message_id
@@ -300,19 +300,14 @@ pub async fn get_messages_response(
 
             let mut message_infos = Vec::new();
             for msg in messages {
-                if let Ok(Some(author)) = state.db.get_user_by_id(msg.author_id).await {
-                    message_infos.push(MessageInfo {
-                        message_id: msg.id,
-                        author_username: author.username,
-                        content: msg.content,
-                        message_type: msg.message_type,
-                        created_at: msg.created_at,
-                    });
-                } else {
-                    error!("Database error getting user by id {}", msg.author_id);
-                    let _ = send_error(state, user_id, AppError::Internal);
-                    return;
-                }
+                message_infos.push(MessageInfo {
+                    message_id: msg.id,
+                    author_username: msg.author_username,
+                    content: msg.content,
+                    message_type: msg.message_type,
+                    message_status: msg.status,
+                    created_at: msg.created_at,
+                });
             }
             info!(
                 "Sending {} messages to user {} for room {}",
@@ -320,6 +315,7 @@ pub async fn get_messages_response(
                 user_id,
                 room_id
             );
+            debug!("Messages: {:?}", message_infos);
             let _ = send_event(
                 state,
                 user_id,

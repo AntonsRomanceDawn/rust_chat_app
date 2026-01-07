@@ -19,10 +19,10 @@ export interface RegisterResp {
 
 export interface MessageInfo {
     message_id: string;
-    author_username: string;
+    author_username?: string;
     content: string;
     message_type: 'text' | 'file' | 'system';
-    status: 'sent' | 'edited' | 'deleted';
+    message_status: 'sent' | 'edited' | 'deleted';
     created_at: string;
 }
 
@@ -85,8 +85,8 @@ export type ServerResp =
     | { type: 'invitation_declined'; invitation_id: string }
     | { type: 'invitee_declined'; invitation_id: string; room_id: string; room_name: string; invitee_username: string }
     | { type: 'pending_invitations'; pending_invitations: InvitationInfo[] }
-    | { type: 'message_sent'; message_id: string; room_id: string; room_name: string; content: string; created_at: string; message_type: 'text' | 'file' | 'system'; status: 'sent' | 'edited' | 'deleted' }
-    | { type: 'message_received'; message_id: string; room_id: string; room_name: string; author_username: string; content: string; created_at: string; message_type: 'text' | 'file' | 'system'; status: 'sent' | 'edited' | 'deleted' }
+    | { type: 'message_sent'; message_id: string; room_id: string; room_name: string; content: string; created_at: string; message_type: 'text' | 'file' | 'system'; message_status: 'sent' | 'edited' | 'deleted' }
+    | { type: 'message_received'; message_id: string; room_id: string; room_name: string; author_username?: string; content: string; created_at: string; message_type: 'text' | 'file' | 'system'; message_status: 'sent' | 'edited' | 'deleted' }
     | { type: 'message_edited'; message_id: string; new_content: string }
     | { type: 'message_deleted'; message_id: string }
     | { type: 'message_history'; room_id: string; room_name: string; messages: MessageInfo[] }

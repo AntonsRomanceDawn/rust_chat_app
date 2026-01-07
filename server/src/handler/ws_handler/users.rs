@@ -4,11 +4,13 @@ use uuid::Uuid;
 use crate::{
     config::AppState,
     database::{room_members::RoomMemberRepository, rooms::RoomRepository, users::UserRepository},
-    dtos::{ServerResp, UserInfo},
+    dtos::{ServerResp, SystemMessageContent, UserInfo},
     errors::error::AppError,
 };
 
-use super::utils::{send_error, send_event};
+use crate::handler::ws_handler::utils::{
+    create_and_broadcast_system_message, send_error, send_event,
+};
 
 #[instrument(skip(state), fields(user_id = %user_id))]
 pub async fn delete_account_response(state: &&AppState, user_id: Uuid) {
@@ -91,6 +93,37 @@ pub async fn kick_member_response(
     let _ = match state.db.remove_member(room_id, member.id).await {
         Ok(Some(member)) => {
             info!("User {} was kicked from room {}", member.user_id, room_id);
+
+            let admin_username = match state.db.get_user_by_id(user_id).await {
+                Ok(Some(u)) => u.username,
+                _ => "Admin".to_string(),
+            };
+
+            let sys_msg = create_and_broadcast_system_message(
+                state,
+                room_id,
+                member.room_name.clone(),
+                SystemMessageContent::Kicked {
+                    username: member.username.clone(),
+                    by: admin_username,
+                },
+            )
+            .await;
+
+            if let Ok(message) = sys_msg {
+                // Also send the system message to the kicked user so they see it
+                let event = ServerResp::MessageReceived {
+                    message_id: message.id,
+                    room_id: message.room_id,
+                    room_name: message.room_name,
+                    author_username: message.author_username,
+                    content: message.content,
+                    message_type: message.message_type,
+                    created_at: message.created_at,
+                };
+                let _ = send_event(state, member.user_id, event);
+            }
+
             if let Ok(members) = state.db.get_members(room_id).await {
                 let event = ServerResp::MemberKicked {
                     room_id: member.room_id,

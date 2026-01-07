@@ -68,11 +68,15 @@ pub struct Room {
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct RoomMember {
+    pub id: Uuid,
     pub room_id: Uuid,
     pub room_name: String,
     pub user_id: Uuid,
     pub username: String,
     pub joined_at: DateTime<Utc>,
+    pub left_at: Option<DateTime<Utc>>,
+    #[sqlx(default)]
+    pub is_visible: bool,
     pub last_read_at: DateTime<Utc>,
     pub unread_count: i32,
 }
@@ -82,8 +86,8 @@ pub struct UserMessage {
     pub id: Uuid,
     pub room_id: Uuid,
     pub room_name: String,
-    pub author_id: Uuid,
-    pub author_username: String,
+    pub author_id: Option<Uuid>,
+    pub author_username: Option<String>,
     pub content: String,
     pub message_type: MessageType,
     pub status: MessageStatus,
@@ -152,7 +156,7 @@ impl std::fmt::Display for MessageType {
 
 impl From<String> for MessageType {
     fn from(value: String) -> Self {
-        match value.as_str() {
+        match value.to_lowercase().as_str() {
             "text" => MessageType::Text,
             "file" => MessageType::File,
             "system" => MessageType::System,

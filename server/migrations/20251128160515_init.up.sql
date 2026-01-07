@@ -30,14 +30,16 @@ CREATE TABLE rooms (
 
 -- room_members
 CREATE TABLE room_members (
+    id        UUID PRIMARY KEY,
     room_id   UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
     room_name TEXT NOT NULL,
     user_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     username  TEXT NOT NULL,
     joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    left_at   TIMESTAMPTZ,
+    is_visible BOOLEAN NOT NULL DEFAULT TRUE,
     last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    unread_count INT NOT NULL DEFAULT 0,
-    PRIMARY KEY (room_id, user_id)
+    unread_count INT NOT NULL DEFAULT 0
 );
 
 -- user_messages
@@ -45,8 +47,8 @@ CREATE TABLE user_messages (
     id         UUID PRIMARY KEY,
     room_id    UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
     room_name  TEXT NOT NULL,
-    author_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    author_username TEXT NOT NULL,
+    author_id  UUID REFERENCES users(id) ON DELETE CASCADE,
+    author_username TEXT,
     content    TEXT NOT NULL,
     message_type TEXT NOT NULL,
     status     TEXT NOT NULL DEFAULT 'sent',

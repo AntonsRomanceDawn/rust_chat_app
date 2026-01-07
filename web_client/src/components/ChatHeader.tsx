@@ -49,11 +49,13 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
     return (
         <div style={{
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            padding: '16px 20px',
+            padding: '0 20px',
+            height: '70px', // Fixed height to match Sidebar
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             color: 'white',
+            flexShrink: 0,
         }}>
             <div>
                 <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>

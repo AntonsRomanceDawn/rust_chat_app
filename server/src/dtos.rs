@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    database::models::{InvitationStatus, MessageType, UserRole},
+    database::models::{InvitationStatus, MessageStatus, MessageType, UserRole},
     errors::error::ApiErrorItem,
     utils::validation::{validate_confirm_password, validate_password, validate_username},
 };
@@ -273,7 +273,7 @@ pub enum ServerResp {
         message_id: Uuid,
         room_id: Uuid,
         room_name: String,
-        author_username: String,
+        author_username: Option<String>,
         content: String,
         message_type: MessageType,
         created_at: DateTime<Utc>,
@@ -313,6 +313,14 @@ pub enum ServerResp {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SystemMessageContent {
+    Joined { username: String },
+    Left { username: String },
+    Kicked { username: String, by: String },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserInfo {
     pub username: String,
     pub created_at: DateTime<Utc>,
@@ -337,9 +345,10 @@ pub struct MemberInfo {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MessageInfo {
     pub message_id: Uuid,
-    pub author_username: String,
+    pub author_username: Option<String>,
     pub content: String,
     pub message_type: MessageType,
+    pub message_status: MessageStatus,
     pub created_at: DateTime<Utc>,
 }
 
