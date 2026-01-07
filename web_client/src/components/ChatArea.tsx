@@ -5,8 +5,9 @@ import { MessageInput } from './MessageInput';
 
 interface Message {
     message_id: string;
-    author_username: string;
+    author_username?: string;
     content: string;
+    message_type: string;
     message_status: string;
     created_at: string;
 }

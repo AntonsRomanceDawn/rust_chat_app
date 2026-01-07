@@ -5,7 +5,7 @@ interface Room {
     room_name: string;
     unread_count: number;
     last_message?: {
-        author_username: string;
+        author_username?: string;
         content: string;
         message_type: string;
     };
