@@ -76,7 +76,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    const parseFileContent = (content: string): { type: 'file'; file_id: string; filename: string; size: number; mimeType: string } | null => {
+    const parseFileContent = (content: string): { type: 'file'; file_id: string; filename: string; size: number; mimeType: string; key?: string; iv?: string } | null => {
         try {
             const parsed = JSON.parse(content);
             if (parsed.type === 'file') {
@@ -96,7 +96,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
         return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
     };
 
-    const handleDownloadFile = async (fileId: string, filename: string, messageId: string, mimeType: string) => {
+    const handleDownloadFile = async (fileId: string, filename: string, messageId: string, mimeType: string, keyBase64?: string, ivBase64?: string) => {
         if (!token) return;
         try {
             console.log('Downloading file:', { fileId, messageId, filename });
@@ -119,12 +119,45 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
             }
 
             const data = await response.json();
+            // Server returns `encrypted_data` which is an array of numbers (Vec<u8> serialized)
+            // or if it returns base64 we need to decode. Assuming standard JSON serialization of Vec<u8> is array.
+            // But wait, the previous code used `new Uint8Array(data.encrypted_data)`.
 
-            // Decrypt the encrypted_data (you might want to use signalManager here for proper decryption)
-            const encryptedData = new Uint8Array(data.encrypted_data);
+            const rawData = new Uint8Array(data.encrypted_data);
+            let finalData: ArrayBuffer | Uint8Array = rawData;
+
+            if (keyBase64 && ivBase64) {
+                try {
+                    const binary_key = window.atob(keyBase64);
+                    const keyBytes = new Uint8Array(binary_key.length);
+                    for (let i = 0; i < binary_key.length; i++) keyBytes[i] = binary_key.charCodeAt(i);
+
+                    const binary_iv = window.atob(ivBase64);
+                    const ivBytes = new Uint8Array(binary_iv.length);
+                    for (let i = 0; i < binary_iv.length; i++) ivBytes[i] = binary_iv.charCodeAt(i);
+
+                    const key = await window.crypto.subtle.importKey(
+                        "raw",
+                        keyBytes,
+                        "AES-GCM",
+                        true,
+                        ["decrypt"]
+                    );
+
+                    finalData = await window.crypto.subtle.decrypt(
+                        { name: "AES-GCM", iv: ivBytes },
+                        key,
+                        rawData
+                    );
+                } catch (e) {
+                    console.error("Decryption failed", e);
+                    alert("Fatal: Could not decrypt file content.");
+                    return;
+                }
+            }
 
             // Create blob and download
-            const blob = new Blob([encryptedData], { type: mimeType || 'application/octet-stream' });
+            const blob = new Blob([finalData as BlobPart], { type: mimeType || 'application/octet-stream' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -202,7 +235,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
                                         </div>
                                     </div>
                                     <button
-                                        onClick={() => handleDownloadFile(fileData.file_id, fileData.filename, msg.message_id, fileData.mimeType)}
+                                        onClick={() => handleDownloadFile(fileData.file_id, fileData.filename, msg.message_id, fileData.mimeType, fileData.key, fileData.iv)}
                                         style={{
                                             background: isOwn ? 'rgba(255,255,255,0.2)' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                                             color: isOwn ? 'white' : 'white',

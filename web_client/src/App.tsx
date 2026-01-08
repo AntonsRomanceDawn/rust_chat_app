@@ -265,21 +265,59 @@ function App() {
         }
 
         try {
-            const arrayBuffer = await file.arrayBuffer();
-            const fileData = new Uint8Array(arrayBuffer);
+            setNotification({
+                message: `Encrypting ${file.name}...`,
+                type: 'info',
+            });
 
+            // 1. Generate AES-GCM Key & IV
+            const key = await window.crypto.subtle.generateKey(
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"]
+            );
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+            // 2. Encrypt File Content
+            const fileRawBuffer = await file.arrayBuffer();
+            const encryptedBuffer = await window.crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                fileRawBuffer
+            );
+
+            // 3. Export Key & IV for transport (via Signal Channel)
+            const exportedKey = await window.crypto.subtle.exportKey("raw", key);
+
+            const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+                let binary = '';
+                const bytes = new Uint8Array(buffer);
+                const len = bytes.byteLength;
+                for (let i = 0; i < len; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                return window.btoa(binary);
+            };
+
+            const keyBase64 = arrayBufferToBase64(exportedKey);
+            const ivBase64 = arrayBufferToBase64(iv.buffer);
+
+            // 4. Prepare Upload (Encrypted Blob)
             const metadata = JSON.stringify({
                 filename: file.name,
                 mimeType: file.type,
-                size: file.size,
+                size: file.size, // Original size
             });
 
             const formData = new FormData();
-            formData.append('encrypted_data', new Blob([fileData]));
+            formData.append('encrypted_data', new Blob([encryptedBuffer]));
+            // We just upload the metadata as is (or encrypted if we bothered, but server treats it as blob)
+            // Ideally we encrypt metadata too, but for now blocking raw file content is the priority.
+            // The file itself is now fully opaque to the server.
             formData.append('encrypted_metadata', new Blob([metadata], { type: 'application/json' }));
 
             setNotification({
-                message: `Uploading ${file.name}...`,
+                message: `Uploading encrypted ${file.name}...`,
                 type: 'success',
             });
 
@@ -290,12 +328,15 @@ function App() {
                 },
             });
 
+            // 5. Send Message (Signal Encrypted) containing the keys
             const fileMsgContent = JSON.stringify({
                 type: 'file',
                 file_id: res.data.file_id,
                 filename: file.name,
                 size: file.size,
-                mimeType: file.type
+                mimeType: file.type,
+                key: keyBase64,
+                iv: ivBase64
             });
 
             send({
@@ -306,7 +347,7 @@ function App() {
             });
 
             setNotification({
-                message: `File ${file.name} uploaded successfully!`,
+                message: `File ${file.name} sent secure!`,
                 type: 'success',
             });
         } catch (err: any) {
