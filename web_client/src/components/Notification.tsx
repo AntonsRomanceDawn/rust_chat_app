@@ -2,7 +2,7 @@ import React from 'react';
 
 interface NotificationProps {
     message: string;
-    type: 'error' | 'success';
+    type: 'error' | 'success' | 'info';
 }
 
 export const Notification: React.FC<NotificationProps> = ({ message, type }) => {
@@ -11,7 +11,7 @@ export const Notification: React.FC<NotificationProps> = ({ message, type }) => 
             position: 'fixed',
             bottom: '16px',
             left: '16px',
-            background: type === 'error' ? '#dc2626' : '#16a34a',
+            background: type === 'error' ? '#dc2626' : (type === 'success' ? '#16a34a' : '#2563eb'),
             color: 'white',
             padding: '16px',
             borderRadius: '6px',

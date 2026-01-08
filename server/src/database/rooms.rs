@@ -4,7 +4,10 @@ use sqlx::Row;
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::database::{db::Db, models::Room};
+use crate::database::{
+    db::Db,
+    models::{Invitation, Room},
+};
 
 #[async_trait]
 pub trait RoomRepository: Send + Sync {
@@ -25,7 +28,11 @@ pub trait RoomRepository: Send + Sync {
 
     async fn delete_room(&self, room_id: Uuid) -> Result<Option<Room>, sqlx::Error>;
 
-    async fn leave_room(&self, room_id: Uuid, user_id: Uuid) -> Result<Option<Room>, sqlx::Error>;
+    async fn leave_room(
+        &self,
+        room_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<(Vec<Invitation>, Room)>, sqlx::Error>;
 
     // async fn get_user_rooms(&self, user_id: Uuid) -> Result<Vec<Room>, sqlx::Error>;
 }
@@ -109,18 +116,27 @@ impl RoomRepository for Db {
     }
 
     #[instrument(skip(self))]
-    async fn leave_room(&self, room_id: Uuid, user_id: Uuid) -> Result<Option<Room>, sqlx::Error> {
+    async fn leave_room(
+        &self,
+        room_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<(Vec<Invitation>, Room)>, sqlx::Error> {
+        // pending invitations for the room
+        let mut pending_invs = Vec::<Invitation>::new();
+
         let mut tx = self.pool().begin().await?;
 
-        let room = sqlx::query_as::<_, Room>(r#"SELECT * FROM rooms WHERE id = $1"#)
+        let room = match sqlx::query_as::<_, Room>(r#"SELECT * FROM rooms WHERE id = $1"#)
             .bind(room_id)
             .fetch_optional(&mut *tx)
-            .await?;
-
-        if room.is_none() {
-            tx.commit().await?;
-            return Ok(None);
-        }
+            .await?
+        {
+            Some(room) => room,
+            None => {
+                tx.commit().await?;
+                return Ok(None);
+            }
+        };
 
         // Check if user is currently an active member (not already left/kicked)
         let is_active_member = sqlx::query(
@@ -144,10 +160,11 @@ impl RoomRepository for Db {
             .await?;
 
             tx.commit().await?;
-            return Ok(room);
+            return Ok(Some((pending_invs, room)));
         }
 
         // User IS active. They are leaving now.
+
         let member_ids: Vec<Uuid> = sqlx::query(
             r#"SELECT user_id FROM room_members WHERE room_id = $1 AND left_at IS NULL"#,
         )
@@ -159,13 +176,19 @@ impl RoomRepository for Db {
         .collect();
 
         if member_ids.len() == 1 {
-            // Last member leaving. Delete room.
+            // Last member leaving. First fetch Invitations to notify users.
+            pending_invs =
+                sqlx::query_as::<_, Invitation>(r#"SELECT * FROM invitations WHERE room_id = $1"#)
+                    .bind(room_id)
+                    .fetch_all(&mut *tx)
+                    .await?;
+
             sqlx::query(r#"DELETE FROM rooms WHERE id = $1"#)
                 .bind(room_id)
                 .execute(&mut *tx)
                 .await?;
             tx.commit().await?;
-            return Ok(room);
+            return Ok(Some((pending_invs, room)));
         }
 
         // Standard leave: set left_at and hide it.
@@ -176,23 +199,21 @@ impl RoomRepository for Db {
             .execute(&mut *tx)
             .await?;
 
-        if let Some(room) = &room {
-            if room.admin_id == user_id {
-                let new_admin = member_ids
-                    .into_iter()
-                    .find(|&id| id != user_id)
-                    .ok_or(sqlx::Error::RowNotFound)?;
+        if room.admin_id == user_id {
+            let new_admin = member_ids
+                .into_iter()
+                .find(|&id| id != user_id)
+                .ok_or(sqlx::Error::RowNotFound)?;
 
-                sqlx::query(r#"UPDATE rooms SET admin_id = $1 WHERE id = $2"#)
-                    .bind(new_admin)
-                    .bind(room_id)
-                    .execute(&mut *tx)
-                    .await?;
-            }
+            sqlx::query(r#"UPDATE rooms SET admin_id = $1 WHERE id = $2"#)
+                .bind(new_admin)
+                .bind(room_id)
+                .execute(&mut *tx)
+                .await?;
         }
 
         tx.commit().await?;
-        Ok(room)
+        Ok(Some((pending_invs, room)))
     }
 
     // #[instrument(skip(self))]

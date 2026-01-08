@@ -151,6 +151,7 @@ impl InvitationRepository for Db {
         .fetch_all(self.pool())
         .await
     }
+
     #[instrument(skip(self))]
     async fn consume_invitations_and_join_room(
         &self,

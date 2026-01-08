@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ mode }) => ({
     plugins: [react()],
     esbuild: {
-        drop: mode === 'production' ? ['console', 'debugger'] : [],
+        // drop: mode === 'production' ? ['console', 'debugger'] : [],
     },
     server: {
         proxy: {

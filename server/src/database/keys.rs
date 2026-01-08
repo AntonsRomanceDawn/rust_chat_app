@@ -102,6 +102,13 @@ impl KeyRepository for Db {
         user_id: Uuid,
         keys: Vec<(i32, String)>,
     ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool().begin().await?;
+        // First, clear existing keys to prevent serving stale keys that the client has lost (e.g. after a reinstall/storage wipe)
+        sqlx::query("DELETE FROM one_time_prekeys WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+
         let (key_ids, public_keys): (Vec<i32>, Vec<String>) = keys.into_iter().unzip();
 
         sqlx::query(
@@ -114,8 +121,10 @@ impl KeyRepository for Db {
         .bind(user_id)
         .bind(&key_ids)
         .bind(&public_keys)
-        .execute(self.pool())
+        .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
 
         Ok(())
     }

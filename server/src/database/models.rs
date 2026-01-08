@@ -156,7 +156,7 @@ impl std::fmt::Display for MessageType {
 
 impl From<String> for MessageType {
     fn from(value: String) -> Self {
-        match value.to_lowercase().as_str() {
+        match value.as_str() {
             "text" => MessageType::Text,
             "file" => MessageType::File,
             "system" => MessageType::System,

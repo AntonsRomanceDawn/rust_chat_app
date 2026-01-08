@@ -218,8 +218,20 @@ pub async fn leave_room_response(state: &&AppState, user_id: Uuid, room_id: Uuid
     };
 
     let _ = match state.db.leave_room(room_id, user_id).await {
-        Ok(Some(room)) => {
+        Ok(Some((pending_invs, room))) => {
             info!("User {} left room {}", user_id, room_id);
+            
+            for inv in pending_invs {
+                let _ = send_event(
+                    state,
+                    inv.invitee_id,
+                    ServerResp::InvitationRoomDeleted {
+                        invitation_id: inv.id,
+                        room_id: room.id,
+                        room_name: room.name.clone(),
+                    },
+                );
+            }
 
             let _ = create_and_broadcast_system_message(
                 state,

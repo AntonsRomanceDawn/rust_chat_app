@@ -8,6 +8,7 @@ export interface User {
 export interface LoginResp {
     access_token: string;
     refresh_token: string;
+    has_key_backup: boolean;
 }
 
 export interface RegisterResp {
@@ -64,7 +65,7 @@ export type ClientReq =
     | { type: 'invite'; room_id: string; username: string }
     | { type: 'decline_invitation'; invitation_id: string }
     | { type: 'get_pending_invitations' }
-    | { type: 'send_message'; room_id: string; content: string }
+    | { type: 'send_message'; room_id: string; content: string; message_type?: 'text' | 'file' | 'system' }
     | { type: 'edit_message'; message_id: string; new_content: string }
     | { type: 'delete_message'; message_id: string }
     | { type: 'get_messages'; room_id: string; limit: number; offset: number }
@@ -84,6 +85,7 @@ export type ServerResp =
     | { type: 'invitation_sent'; invitation_id: string; room_id: string; room_name: string; invitee_username: string }
     | { type: 'invitation_declined'; invitation_id: string }
     | { type: 'invitee_declined'; invitation_id: string; room_id: string; room_name: string; invitee_username: string }
+    | { type: 'invitation_room_deleted'; invitation_id: string; room_id: string; room_name: string }
     | { type: 'pending_invitations'; pending_invitations: InvitationInfo[] }
     | { type: 'message_sent'; message_id: string; room_id: string; room_name: string; content: string; created_at: string; message_type: 'text' | 'file' | 'system'; message_status: 'sent' | 'edited' | 'deleted' }
     | { type: 'message_received'; message_id: string; room_id: string; room_name: string; author_username?: string; content: string; created_at: string; message_type: 'text' | 'file' | 'system'; message_status: 'sent' | 'edited' | 'deleted' }

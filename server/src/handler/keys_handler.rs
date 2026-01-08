@@ -1,41 +1,36 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::HeaderMap,
 };
 use tracing::{info, instrument, warn};
 
 use crate::{
     config::AppState,
-    database::{
-        keys::KeyRepository,
-        users::UserRepository,
-    },
+    database::{keys::KeyRepository, users::UserRepository},
     dtos::{
         KeyCountRespDto, OneTimePreKeyDto, PreKeyBundleRespDto, SignedPreKeyDto, UploadKeysReqDto,
     },
     errors::error::AppError,
-    utils::token::extract_and_verify_token,
+    utils::middleware::AuthUser,
 };
 
 #[instrument(skip(state, body))]
 pub async fn upload_keys(
+    user: AuthUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(body): Json<UploadKeysReqDto>,
 ) -> Result<(), AppError> {
-    info!("Uploading keys");
-    let (user_id, _, _) = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
+    info!("Uploading keys for user {}", user.user_id);
 
     let _ = state
         .db
-        .upsert_identity_key(user_id, body.identity_key, body.registration_id)
+        .upsert_identity_key(user.user_id, body.identity_key, body.registration_id)
         .await?;
 
     let _ = state
         .db
         .upsert_signed_prekey(
-            user_id,
+            user.user_id,
             body.signed_prekey.key_id,
             body.signed_prekey.public_key,
             body.signed_prekey.signature,
@@ -48,32 +43,33 @@ pub async fn upload_keys(
         .map(|k| (k.key_id, k.public_key))
         .collect();
 
-    state.db.upload_one_time_prekeys(user_id, ot_keys).await?;
+    state
+        .db
+        .upload_one_time_prekeys(user.user_id, ot_keys)
+        .await?;
 
     Ok(())
 }
 
 #[instrument(skip(state))]
 pub async fn get_key_count(
+    user: AuthUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
 ) -> Result<Json<KeyCountRespDto>, AppError> {
-    info!("Getting prekey bundle count");
-    let (user_id, _, _) = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
+    info!("Getting prekey bundle count for user {}", user.user_id);
 
-    let count = state.db.get_prekey_bundle_counts(user_id).await?;
+    let count = state.db.get_prekey_bundle_counts(user.user_id).await?;
 
     Ok(Json(KeyCountRespDto { count }))
 }
 
 #[instrument(skip(state))]
 pub async fn get_prekey_bundle(
+    _user: AuthUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Path(username): Path<String>,
 ) -> Result<Json<PreKeyBundleRespDto>, AppError> {
     info!("Getting prekey bundle for user: {}", username);
-    let _ = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
 
     let user = match state.db.get_user_by_username(&username).await? {
         Some(user) => user,

@@ -1,20 +1,11 @@
-mod config;
-mod database;
-mod dtos;
-mod errors;
-mod handler;
-mod utils;
-
-use crate::config::{AppState, Config};
-use crate::database::db::Db;
-use crate::handler::app_router::handler;
 use dashmap::DashMap;
 use dotenvy::dotenv;
+use server::config::{AppState, Config};
+use server::create_app;
+use server::database::db::Db;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tower_http::cors::CorsLayer;
-use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -51,9 +42,7 @@ async fn main() {
         channels: Arc::new(DashMap::new()),
     };
 
-    let app = handler(app_state)
-        .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http());
+    let app = create_app(app_state);
 
     let addr = format!("0.0.0.0:{}", config.port);
     info!("Listening on {}", addr);

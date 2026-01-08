@@ -1,7 +1,6 @@
 use axum::{
     Json,
     extract::{Multipart, State},
-    http::HeaderMap,
 };
 use tracing::{info, instrument};
 
@@ -12,19 +11,18 @@ use crate::{
     },
     dtos::{GetFileReqDto, GetFileRespDto, UploadFileRespDto},
     errors::error::AppError,
-    utils::{hash::hash_data, token::extract_and_verify_token},
+    utils::{hash::hash_data, middleware::AuthUser},
 };
 
 const MAX_FILE_SIZE: usize = 50 * 1024 * 1024; // 50 MB
 
-#[instrument(skip(state, headers, body))]
+#[instrument(skip(state, body))]
 pub async fn upload_file(
+    _user: AuthUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     mut body: Multipart,
 ) -> Result<Json<UploadFileRespDto>, AppError> {
     info!("Uploading file");
-    let (_, _, _) = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
 
     let mut encrypted_data: Option<Vec<u8>> = None;
     let mut encrypted_metadata: Option<Vec<u8>> = None;
@@ -74,14 +72,14 @@ pub async fn upload_file(
     }))
 }
 
-#[instrument(skip(state, headers, body))]
+#[instrument(skip(state, body))]
 pub async fn get_file(
+    user: AuthUser,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(body): Json<GetFileReqDto>,
 ) -> Result<Json<GetFileRespDto>, AppError> {
     info!("Getting file");
-    let (user_id, _, _) = extract_and_verify_token(&headers, state.config.jwt_secret.as_bytes())?;
+    let user_id = user.user_id;
 
     let message = match state.db.get_message_by_id(body.message_id).await? {
         Some(msg) => msg,

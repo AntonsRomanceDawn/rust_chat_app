@@ -85,24 +85,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }} />
                     {isConnected ? 'Connected' : 'Disconnected'}
                 </span>
-                <button
-                    onClick={handleLogout}
-                    style={{
-                        background: '#ef4444',
-                        border: 'none',
-                        color: 'white',
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#dc2626'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = '#ef4444'}
-                >
-                    Logout
-                </button>
+                <div style={{ display: 'flex', gap: '5px' }}>
+                    <button
+                        onClick={handleLogout}
+                        style={{
+                            background: '#ef4444',
+                            border: 'none',
+                            color: 'white',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'background 0.2s',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#dc2626'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = '#ef4444'}
+                    >
+                        Logout
+                    </button>
+                </div>
             </div>
 
             {/* Tabs */}

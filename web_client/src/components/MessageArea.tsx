@@ -96,7 +96,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
         return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
     };
 
-    const handleDownloadFile = async (fileId: string, filename: string, messageId: string) => {
+    const handleDownloadFile = async (fileId: string, filename: string, messageId: string, mimeType: string) => {
         if (!token) return;
         try {
             console.log('Downloading file:', { fileId, messageId, filename });
@@ -121,10 +121,10 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
             const data = await response.json();
 
             // Decrypt the encrypted_data (you might want to use signalManager here for proper decryption)
-            const encryptedData = new Uint8Array(Buffer.from(data.encrypted_data, 'utf-8'));
+            const encryptedData = new Uint8Array(data.encrypted_data);
 
             // Create blob and download
-            const blob = new Blob([encryptedData], { type: data.mimeType || 'application/octet-stream' });
+            const blob = new Blob([encryptedData], { type: mimeType || 'application/octet-stream' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -136,9 +136,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
         } catch (error) {
             console.error('Error downloading file:', error);
         }
-    };
-
-    return (
+    }; return (
         <div style={{
             flex: 1,
             overflowY: 'auto',
@@ -204,7 +202,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
                                         </div>
                                     </div>
                                     <button
-                                        onClick={() => handleDownloadFile(fileData.file_id, fileData.filename, msg.message_id)}
+                                        onClick={() => handleDownloadFile(fileData.file_id, fileData.filename, msg.message_id, fileData.mimeType)}
                                         style={{
                                             background: isOwn ? 'rgba(255,255,255,0.2)' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                                             color: isOwn ? 'white' : 'white',

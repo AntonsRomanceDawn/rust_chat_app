@@ -86,6 +86,10 @@ pub enum AppError {
     #[error("Exceeding file limit")]
     ExceedingFileLimit,
 
+    // Backup
+    #[error("Key backup not found")]
+    KeyBackupNotFound,
+
     // General
     #[error("Invalid request format")]
     InvalidRequestFormat,
@@ -163,6 +167,9 @@ impl AppError {
             }
             AppError::ExceedingFileLimit => {
                 vec![ApiErrorItem::new(error_codes::FILE_LIMIT_EXCEEDED, None)]
+            }
+            AppError::KeyBackupNotFound => {
+                vec![ApiErrorItem::new(error_codes::KEY_BACKUP_NOT_FOUND, None)]
             }
         }
     }
@@ -273,6 +280,10 @@ impl IntoResponse for AppError {
             AppError::ExceedingFileLimit => {
                 tracing::debug!("Exceeding file limit");
                 (StatusCode::BAD_REQUEST, self.to_api_errors())
+            }
+            AppError::KeyBackupNotFound => {
+                tracing::debug!("Key backup not found");
+                (StatusCode::NOT_FOUND, self.to_api_errors())
             }
         };
 

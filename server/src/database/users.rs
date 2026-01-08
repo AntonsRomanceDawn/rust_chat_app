@@ -20,6 +20,7 @@ pub trait UserRepository: Send + Sync {
     ) -> Result<Option<User>, sqlx::Error>;
     async fn delete_user(&self, id: Uuid) -> Result<Option<User>, sqlx::Error>;
     async fn search_users(&self, query: &str) -> Result<Vec<User>, sqlx::Error>;
+    async fn update_key_backup(&self, user_id: Uuid, backup: &str) -> Result<(), sqlx::Error>;
 }
 
 #[async_trait]
@@ -85,5 +86,15 @@ impl UserRepository for Db {
         .bind(pattern)
         .fetch_all(self.pool())
         .await
+    }
+
+    #[instrument(skip(self, backup))]
+    async fn update_key_backup(&self, user_id: Uuid, backup: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(r#"UPDATE users SET encrypted_key_backup = $1 WHERE id = $2"#)
+            .bind(backup)
+            .bind(user_id)
+            .execute(self.pool())
+            .await?;
+        Ok(())
     }
 }

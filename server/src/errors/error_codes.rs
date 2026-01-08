@@ -15,6 +15,7 @@ pub const INTERNAL_SERVER_ERROR: &str = "internal_server_error";
 pub const INVALID_REQUEST_FORMAT: &str = "invalid_request_format";
 pub const FILE_LIMIT_EXCEEDED: &str = "file_limit_exceeded";
 pub const FILE_NOT_FOUND: &str = "file_not_found";
+pub const KEY_BACKUP_NOT_FOUND: &str = "key_backup_not_found";
 
 // WebSocket specific errors
 pub const ROOM_NOT_FOUND: &str = "room_not_found";

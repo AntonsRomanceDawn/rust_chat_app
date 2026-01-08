@@ -133,6 +133,11 @@ pub struct OneTimePreKeyDto {
     pub public_key: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KeyBackupDto {
+    pub encrypted_backup: String,
+}
+
 #[derive(Deserialize, Debug)]
 pub struct WsParams {
     pub token: String,
@@ -257,6 +262,11 @@ pub enum ServerResp {
         room_id: Uuid,
         room_name: String,
         invitee_username: String,
+    },
+    InvitationRoomDeleted {
+        invitation_id: Uuid,
+        room_id: Uuid,
+        room_name: String,
     },
     PendingInvitations {
         pending_invitations: Vec<InvitationInfo>,

@@ -2,7 +2,7 @@ import React from 'react';
 
 interface Notification {
     message: string;
-    type: 'error' | 'success';
+    type: 'error' | 'success' | 'info';
 }
 
 interface AuthScreenProps {

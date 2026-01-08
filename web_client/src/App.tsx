@@ -7,6 +7,7 @@ import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
 import { RoomInfoModal } from './components/RoomInfoModal';
 import { Notification } from './components/Notification';
+import { SignalManager } from './signal/SignalManager';
 
 // API base: env override, else relative /api so proxies (Vite dev or Nginx) can forward to backend
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
@@ -36,13 +37,30 @@ function App() {
         localStorage.getItem('username')
     );
 
+    const [signalManager, setSignalManager] = useState<SignalManager | null>(null);
+
+    useEffect(() => {
+        if (token && username) {
+            const apiClient = axios.create({
+                baseURL: API_URL,
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const manager = new SignalManager(username, apiClient);
+            manager.init().then(() => {
+                console.log("Signal initialized");
+                setSignalManager(manager);
+            }).catch(console.error);
+        } else {
+            setSignalManager(null);
+        }
+    }, [token, username]);
+
     const handleLogout = () => {
         setToken(null);
         setUsername(null);
         localStorage.removeItem('token');
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('username');
-        localStorage.removeItem('signal_store_v2');
     };
 
     const refreshAuthToken = async (): Promise<string | null> => {
@@ -83,7 +101,7 @@ function App() {
         setRoomDetails,
         notification,
         setNotification,
-    } = useChat(token, username, refreshAuthToken);
+    } = useChat(token, username, refreshAuthToken, signalManager);
 
     const [messageInput, setMessageInput] = useState('');
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -132,6 +150,9 @@ function App() {
                     username: usernameInput,
                     password: passwordInput,
                 });
+
+                // if (res.data.has_key_backup) {}
+
                 setToken(res.data.access_token);
                 setUsername(usernameInput);
                 localStorage.setItem('token', res.data.access_token);
@@ -244,49 +265,44 @@ function App() {
         }
 
         try {
-            // Read file as ArrayBuffer
             const arrayBuffer = await file.arrayBuffer();
             const fileData = new Uint8Array(arrayBuffer);
 
-            // Create metadata with filename and file type
             const metadata = JSON.stringify({
                 filename: file.name,
                 mimeType: file.type,
                 size: file.size,
             });
 
-            // Encrypt file data and metadata (you'll need to implement encryption in signalManager)
-            // For now, we'll send as is - you should add encryption here
             const formData = new FormData();
             formData.append('encrypted_data', new Blob([fileData]));
-            formData.append('encrypted_metadata', new Blob([new TextEncoder().encode(metadata)]));
+            formData.append('encrypted_metadata', new Blob([metadata], { type: 'application/json' }));
 
             setNotification({
                 message: `Uploading ${file.name}...`,
                 type: 'success',
             });
 
-            // Upload file
-            const uploadRes = await axios.post(`${API_URL}/files`, formData, {
+            const res = await axios.post(`${API_URL}/files`, formData, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'multipart/form-data',
                 },
             });
 
-            // Send message with file reference
-            const fileMessage = JSON.stringify({
+            const fileMsgContent = JSON.stringify({
                 type: 'file',
-                file_id: uploadRes.data.file_id,
+                file_id: res.data.file_id,
                 filename: file.name,
                 size: file.size,
-                mimeType: file.type,
+                mimeType: file.type
             });
 
             send({
                 type: 'send_message',
                 room_id: currentRoom,
-                content: fileMessage,
+                content: fileMsgContent,
+                message_type: 'text' // Treat validation metadata message as text for encryption
             });
 
             setNotification({

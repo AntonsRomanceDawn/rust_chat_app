@@ -44,23 +44,6 @@ pub fn generate_access_token(
     })
 }
 
-#[instrument(skip(headers, secret))]
-pub fn extract_and_verify_token(
-    headers: &axum::http::HeaderMap,
-    secret: &[u8],
-) -> Result<(Uuid, UserRole, usize), AppError> {
-    let token = headers
-        .get("Authorization")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            warn!("Authorization header missing or malformed");
-            AppError::InvalidToken
-        })?;
-
-    verify_access_token(token, secret)
-}
-
 #[instrument]
 pub fn generate_refresh_token() -> Result<String, AppError> {
     let mut bytes = [0u8; 32];

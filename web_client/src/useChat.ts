@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
+import { SignalManager } from './signal/SignalManager';
 import { ClientReq, ServerResp, RoomInfo, MessageInfo, InvitationInfo, UserInfo, MemberInfo } from './types';
-import { SignalManager } from './lib/SignalManager';
+import { messageDb } from './persistence/db';
 
 // Compute WS URL dynamically: use env if provided, else derive from location with HTTPS/WSS
 const WS_PATH = '/ws_handler';
@@ -15,7 +16,7 @@ export interface RoomDetails {
     created_at: string;
 }
 
-export function useChat(token: string | null, username: string | null, refreshToken: () => Promise<string | null>) {
+export function useChat(token: string | null, username: string | null, refreshToken: () => Promise<string | null>, signalManager: SignalManager | null) {
     const [socket, setSocket] = useState<WebSocket | null>(null);
     const [rooms, setRooms] = useState<RoomInfo[]>([]);
     const [currentRoom, setCurrentRoom] = useState<string | null>(null);
@@ -24,38 +25,26 @@ export function useChat(token: string | null, username: string | null, refreshTo
     const [searchResults, setSearchResults] = useState<UserInfo[]>([]);
     const [isConnected, setIsConnected] = useState(false);
     const [roomDetails, setRoomDetails] = useState<RoomDetails | null>(null);
-    const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-    const [signalManager, setSignalManager] = useState<SignalManager | null>(null);
+    const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
 
-    // Ref to access currentRoom inside the websocket callback without dependency issues
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const currentRoomRef = useRef<string | null>(null);
+    const signalManagerRef = useRef(signalManager);
+
+    useEffect(() => {
+        signalManagerRef.current = signalManager;
+    }, [signalManager]);
+
     useEffect(() => {
         currentRoomRef.current = currentRoom;
+        if (currentRoom) {
+            setRoomDetails(null);
+        }
         if (currentRoom && socket && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: 'get_room_info', room_id: currentRoom }));
             socket.send(JSON.stringify({ type: 'get_messages', room_id: currentRoom, limit: 50, offset: 0 }));
         }
     }, [currentRoom, socket]);
-
-    useEffect(() => {
-        if (token && username) {
-            const manager = new SignalManager(username, token);
-            manager.initialize().then(() => {
-                console.log("Signal Manager Initialized");
-                setSignalManager(manager);
-            }).catch(e => {
-                console.error("Failed to initialize Signal Manager", e);
-            });
-        } else {
-            setSignalManager(null);
-        }
-    }, [token, username]);
-
-    const signalManagerRef = useRef<SignalManager | null>(null);
-    useEffect(() => {
-        signalManagerRef.current = signalManager;
-    }, [signalManager]);
 
     useEffect(() => {
         if (!token) {
@@ -84,7 +73,6 @@ export function useChat(token: string | null, username: string | null, refreshTo
                 }
                 console.log('Connected to WebSocket');
                 setIsConnected(true);
-                // Initial data fetch
                 ws?.send(JSON.stringify({ type: 'get_rooms_info' }));
                 ws?.send(JSON.stringify({ type: 'get_pending_invitations' }));
                 if (currentRoomRef.current) {
@@ -143,8 +131,39 @@ export function useChat(token: string | null, username: string | null, refreshTo
         console.log('Received:', data);
         switch (data.type) {
             case 'rooms_info':
-                setRooms(data.rooms);
-                // Unread counts are now part of the room object, no need to maintain separate state map
+                {
+                    const sm = signalManagerRef.current;
+                    const processedRooms = await Promise.all(
+                        (data.rooms as RoomInfo[]).map(async (r) => {
+                            if (r.last_message) {
+                                const stored = await messageDb.getMessage(r.last_message.message_id);
+                                if (stored) {
+                                    return {
+                                        ...r,
+                                        last_message: { ...r.last_message, content: stored.content }
+                                    };
+                                }
+
+                                let content = r.last_message.content;
+                                if (r.last_message.message_type === 'text' && sm) {
+                                    try {
+                                        content = await sm.decryptGroupMessage(r.last_message.author_username || 'Unknown', content);
+                                        await messageDb.saveMessage({
+                                            ...r.last_message,
+                                            content,
+                                            room_id: r.room_id
+                                        });
+                                    } catch (e) {
+                                        content = "Message";
+                                    }
+                                }
+                                return { ...r, last_message: { ...r.last_message, content } };
+                            }
+                            return r;
+                        })
+                    );
+                    setRooms(processedRooms);
+                }
                 break;
             case 'room_created':
                 setRooms(prev => [{ room_id: data.room_id, room_name: data.room_name, unread_count: 0 }, ...prev]);
@@ -178,28 +197,43 @@ export function useChat(token: string | null, username: string | null, refreshTo
             case 'invitation_declined':
                 setInvitations(prev => prev.filter(inv => inv.invitation_id !== data.invitation_id));
                 break;
+            case 'invitation_room_deleted':
+                setInvitations(prev => prev.filter(inv => inv.invitation_id !== data.invitation_id));
+                setNotification({ message: `Invitation for room "${data.room_name}" was removed because the room was deleted.`, type: 'info' });
+                break;
+            case 'invitee_declined':
+                setNotification({ message: `${data.invitee_username} declined your invitation to ${data.room_name}`, type: 'info' });
+                break;
             case 'message_history':
                 {
+                    const sm = signalManagerRef.current;
                     const decryptedMessages = await Promise.all(data.messages.map(async (msg) => {
+                        const stored = await messageDb.getMessage(msg.message_id);
+                        if (stored) {
+                            return { ...msg, content: stored.content, message_type: msg.message_type };
+                        }
+
                         let content = msg.content;
-                        // if (signalManagerRef.current) {
-                        //     content = await signalManagerRef.current.decryptMessage(msg.author_username, msg.content);
-                        // }
+                        if (msg.message_type === 'text' && sm) {
+                            try {
+                                content = await sm.decryptGroupMessage(msg.author_username || 'Unknown', msg.content);
+                                await messageDb.saveMessage({
+                                    ...msg,
+                                    content,
+                                    room_id: data.room_id
+                                });
+                            } catch (e) {
+                                content = "[Decryption Failed - Session Expired]";
+                            }
+                        }
                         return { ...msg, content, message_type: msg.message_type };
                     }));
 
                     if (decryptedMessages.length > 0) {
-                        // Update last message in room list if this looks like the latest batch
-                        // We don't distinctly know if offset=0 here easily without passing it back,
-                        // but typically history response arrives on room join.
-                        // We can check if we have this room in rooms list and if it has no last_message or if this message is newer.
-                        // But decryptedMessages is sorted ASC or DESC?
-                        // Server says: "messages.reverse(); Ok(messages)" after fetching with DESC sort. So they are ASC (oldest first).
-                        const lastMsg = decryptedMessages[decryptedMessages.length - 1]; // Newest in this batch
+                        const lastMsg = decryptedMessages[decryptedMessages.length - 1];
 
                         setRooms(prev => prev.map(r => {
                             if (r.room_id === data.room_id) {
-                                // Update if current last_message is older or missing
                                 if (!r.last_message || new Date(r.last_message.created_at) < new Date(lastMsg.created_at)) {
                                     return { ...r, last_message: lastMsg };
                                 }
@@ -208,9 +242,9 @@ export function useChat(token: string | null, username: string | null, refreshTo
                         }));
                     }
 
+
                     setMessages(prev => {
                         const existing = prev[data.room_id] || [];
-                        // Prepend new messages, avoiding duplicates based on message_id
                         const existingIds = new Set(existing.map(m => m.message_id));
                         const uniqueNew = decryptedMessages.filter(m => !existingIds.has(m.message_id));
 
@@ -224,28 +258,39 @@ export function useChat(token: string | null, username: string | null, refreshTo
             case 'message_received':
             case 'message_sent':
                 {
-                    console.log('MESSAGE_EVENT', data);
                     let content = data.content;
-                    const author = data.type === 'message_sent' ? (username || 'Me') : data.author_username;
-                    // if (signalManagerRef.current && data.type === 'message_received') {
-                    //      content = await signalManagerRef.current.decryptMessage(author, data.content);
-                    // }
+                    let author = (data as any).author_username || username || 'Unknown';
+                    const sm = signalManagerRef.current;
+
+                    if (data.message_type === 'text' && sm) {
+                        try {
+                            content = await sm.decryptGroupMessage(author, data.content);
+                        } catch (e) {
+                            content = "[Decryption Failed - Session Expired]";
+                        }
+                    }
 
                     const newMessage: MessageInfo = {
                         message_id: data.message_id,
-                        author_username: author, // 'message_sent' doesn't have author_username in payload
+                        author_username: author,
                         content: content,
                         message_type: data.message_type,
                         message_status: data.message_status,
                         created_at: data.created_at
                     };
 
+                    if (data.message_type === 'text' && content !== "[Decryption Error]") {
+                        await messageDb.saveMessage({
+                            ...newMessage,
+                            room_id: data.room_id
+                        });
+                    }
+
                     setMessages(prev => ({
                         ...prev,
                         [data.room_id]: [...(prev[data.room_id] || []), newMessage]
                     }));
 
-                    // Update room list preview and unread count
                     setRooms(prev => {
                         const roomIndex = prev.findIndex(r => r.room_id === data.room_id);
                         if (roomIndex === -1) return prev;
@@ -257,33 +302,45 @@ export function useChat(token: string | null, username: string | null, refreshTo
                             updatedRoom.unread_count += 1;
                         }
 
-                        // Move updated room to top
                         const otherRooms = prev.filter(r => r.room_id !== data.room_id);
                         return [updatedRoom, ...otherRooms];
                     });
                 }
                 break;
             case 'message_edited':
-                setMessages(prev => {
-                    const newMessages = { ...prev };
-                    for (const roomId in newMessages) {
-                        const idx = newMessages[roomId].findIndex(m => m.message_id === data.message_id);
-                        if (idx !== -1) {
-                            newMessages[roomId] = newMessages[roomId].map(m =>
-                                m.message_id === data.message_id ? { ...m, content: data.new_content, message_status: 'edited' } : m
-                            );
-                            // Update last message in room list if needed
-                            setRooms(rooms => rooms.map(r => {
-                                if (r.room_id === roomId && r.last_message?.message_id === data.message_id) {
-                                    return { ...r, last_message: { ...r.last_message, content: data.new_content, message_status: 'edited' } };
-                                }
-                                return r;
-                            }));
+                {
+                    let decryptedContent = data.new_content;
+                    let author: string | undefined;
+                    for (const rid in messages) {
+                        const existing = messages[rid].find(m => m.message_id === data.message_id);
+                        if (existing) {
+                            author = existing.author_username;
                             break;
                         }
                     }
-                    return newMessages;
-                });
+                    author = author || 'Unknown';
+
+                    setMessages(prev => {
+                        const newMessages = { ...prev };
+                        for (const roomId in newMessages) {
+                            const idx = newMessages[roomId].findIndex(m => m.message_id === data.message_id);
+                            if (idx !== -1) {
+                                newMessages[roomId] = newMessages[roomId].map(m =>
+                                    m.message_id === data.message_id ? { ...m, content: decryptedContent, message_status: 'edited' } : m
+                                );
+
+                                setRooms(rooms => rooms.map(r => {
+                                    if (r.room_id === roomId && r.last_message?.message_id === data.message_id) {
+                                        return { ...r, last_message: { ...r.last_message, content: decryptedContent, message_status: 'edited' } };
+                                    }
+                                    return r;
+                                }));
+                                break;
+                            }
+                        }
+                        return newMessages;
+                    });
+                }
                 break;
             case 'message_deleted':
                 setMessages(prev => {
@@ -320,14 +377,23 @@ export function useChat(token: string | null, username: string | null, refreshTo
             case 'users_found':
                 setSearchResults(data.users);
                 break;
+            case 'member_joined':
+                if (currentRoomRef.current === data.room_id) {
+                    setRoomDetails(prev => {
+                        if (!prev || prev.room_id !== data.room_id) return prev;
+                        if (prev.members.some(m => m.username === data.username)) return prev;
+                        return {
+                            ...prev,
+                            members: [...prev.members, { username: data.username, joined_at: data.joined_at }]
+                        };
+                    });
+                }
+                setNotification({ message: `${data.username} joined ${data.room_name}`, type: 'success' });
+                break;
             case 'member_kicked':
                 if (data.username === username) {
                     // I was kicked
                     if (currentRoomRef.current === data.room_id) {
-                        // Optional: Maybe don't close the room immediately if they want to see "You were kicked"?
-                        // But requirements say "loses sight as the server deletes them", so they WANT to keep seeing it.
-                        // We will NOT remove from rooms list.
-                        // We will only show notification.
                     }
                     setNotification({ message: `You were kicked from ${data.room_name}`, type: 'error' });
                 } else {
@@ -352,21 +418,37 @@ export function useChat(token: string | null, username: string | null, refreshTo
 
     const send = async (req: ClientReq) => {
         if (socket && socket.readyState === WebSocket.OPEN) {
-            if (req.type === 'send_message' && signalManagerRef.current && roomDetails && roomDetails.room_id === req.room_id) {
+            if (req.type === 'send_message') {
                 try {
-                    const members = roomDetails.members.map(m => m.username);
-                    const encrypted = await signalManagerRef.current.encryptGroupMessage(req.room_id, req.content, members);
-                    const newReq = { ...req, content: encrypted.content };
+                    let content = req.content;
+                    if (signalManager && (req.message_type === undefined || req.message_type === 'text')) { // Default is text
+
+                        if (!roomDetails || roomDetails.room_id !== req.room_id) {
+                            setNotification({ message: "Cannot encrypt: Room participant list not loaded. Please re-select the room.", type: 'error' });
+                            return;
+                        }
+
+                        const recipients = roomDetails.members.map(m => m.username);
+                        content = await signalManager.encryptGroupMessage(recipients, req.content);
+                    }
+
+                    const newReq = { ...req, content: content };
                     socket.send(JSON.stringify(newReq));
                 } catch (e) {
-                    console.error("Encryption failed", e);
-                    setNotification({ message: "Failed to encrypt message", type: 'error' });
+                    console.error("Encryption/Send failed", e);
+                    setNotification({ message: "Failed to send message", type: 'error' });
+                }
+            } else if (req.type === 'edit_message') {
+                try {
+                    const newReq = { ...req, new_content: req.new_content };
+                    socket.send(JSON.stringify(newReq));
+                } catch (e) {
+                    // console.error("Encryption failed", e);
+                    // setNotification({ message: "Failed to encrypt message edit", type: 'error' });
                 }
             } else {
                 socket.send(JSON.stringify(req));
             }
-        } else {
-            console.error('WebSocket not connected');
         }
     };
 
@@ -378,9 +460,6 @@ export function useChat(token: string | null, username: string | null, refreshTo
 
     const loadMoreMessages = (roomId: string) => {
         const currentMsgs = messages[roomId] || [];
-        // Only fetch if we have some messages (initial load logic handles 0)
-        // or we rely on consumer to know.
-        // Assuming limit=50.
         send({
             type: 'get_messages',
             room_id: roomId,
