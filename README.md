@@ -1,8 +1,15 @@
+# Author's notes
+**Motivation:** This project started as a hobby to deepen my Rust skills and explore applied cryptography, with a focus on building secure, robust backend systems.
+
+Driven by a belief in giving people more control over their privacy, I chose to challenge myself by building an **end-to-end encrypted (E2EE)** chat application, as I believed this to be an area that offers quick early progress but also exposes hard, real-world problems as the system grows.
+
+**Note:** The frontend was implemented with AI assistance to provide a functional interface, allowing the primary engineering focus to remain on the Rust backend and the cryptographic architecture.
+
 # 🔐 Rust & React End-to-End Encrypted Chat
 
 > **A high-security, zero-knowledge messaging platform built effectively from scratch.**
 
-This project demonstrates a production-grade implementation of **End-to-End Encryption (E2EE)** using the Signal Protocol. It features a high-performance **Rust** backend that acts as a blind relay, and a **React/TypeScript** frontend that handles all cryptographic operations locally.
+This project demonstrates a production-grade implementation of **End-to-End Encryption** using the Signal Protocol. It features a high-performance **Rust** backend that acts as a blind relay, and a **React/TypeScript** frontend that handles all cryptographic operations locally.
 
 **Value Proposition:** The server *never* sees plaintext messages. Even if the database is compromised, user conversations remain mathematically secure.
 
